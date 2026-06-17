@@ -1,0 +1,223 @@
+{
+  "title": "Heat Pump Consumption Forecast",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Set up Heat Pump Consumption Forecast",
+        "description": "Choose building type, number of dwelling units and whether occupancy or fixed persons should be considered.",
+        "data": {
+          "name": "Name",
+          "building_type": "Building type",
+          "unit_count": "Number of dwelling units",
+          "person_model": "Person model",
+          "has_occupancy_calendars": "Use occupancy calendars",
+          "fixed_persons": "Total fixed persons"
+        }
+      },
+      "units": {
+        "title": "Configure dwelling units",
+        "description": "Set name, floor area and optional fixed persons or calendar per dwelling unit.",
+        "data": {
+          "unit_1_name": "Unit 1 name",
+          "unit_1_area_sqm": "Unit 1 floor area",
+          "unit_1_fixed_persons": "Fixed persons unit 1",
+          "unit_1_calendar": "Occupancy calendar unit 1",
+          "unit_2_name": "Unit 2 name",
+          "unit_2_area_sqm": "Unit 2 floor area",
+          "unit_2_fixed_persons": "Fixed persons unit 2",
+          "unit_2_calendar": "Occupancy calendar unit 2",
+          "unit_3_name": "Unit 3 name",
+          "unit_3_area_sqm": "Unit 3 floor area",
+          "unit_3_fixed_persons": "Fixed persons unit 3",
+          "unit_3_calendar": "Occupancy calendar unit 3",
+          "unit_4_name": "Unit 4 name",
+          "unit_4_area_sqm": "Unit 4 floor area",
+          "unit_4_fixed_persons": "Fixed persons unit 4",
+          "unit_4_calendar": "Occupancy calendar unit 4",
+          "unit_5_name": "Unit 5 name",
+          "unit_5_area_sqm": "Unit 5 floor area",
+          "unit_5_fixed_persons": "Fixed persons unit 5",
+          "unit_5_calendar": "Occupancy calendar unit 5",
+          "unit_6_name": "Unit 6 name",
+          "unit_6_area_sqm": "Unit 6 floor area",
+          "unit_6_fixed_persons": "Fixed persons unit 6",
+          "unit_6_calendar": "Occupancy calendar unit 6",
+          "unit_7_name": "Unit 7 name",
+          "unit_7_area_sqm": "Unit 7 floor area",
+          "unit_7_fixed_persons": "Fixed persons unit 7",
+          "unit_7_calendar": "Occupancy calendar unit 7",
+          "unit_8_name": "Unit 8 name",
+          "unit_8_area_sqm": "Unit 8 floor area",
+          "unit_8_fixed_persons": "Fixed persons unit 8",
+          "unit_8_calendar": "Occupancy calendar unit 8",
+          "unit_9_name": "Unit 9 name",
+          "unit_9_area_sqm": "Unit 9 floor area",
+          "unit_9_fixed_persons": "Fixed persons unit 9",
+          "unit_9_calendar": "Occupancy calendar unit 9",
+          "unit_10_name": "Unit 10 name",
+          "unit_10_area_sqm": "Unit 10 floor area",
+          "unit_10_fixed_persons": "Fixed persons unit 10",
+          "unit_10_calendar": "Occupancy calendar unit 10",
+          "unit_11_name": "Unit 11 name",
+          "unit_11_area_sqm": "Unit 11 floor area",
+          "unit_11_fixed_persons": "Fixed persons unit 11",
+          "unit_11_calendar": "Occupancy calendar unit 11",
+          "unit_12_name": "Unit 12 name",
+          "unit_12_area_sqm": "Unit 12 floor area",
+          "unit_12_fixed_persons": "Fixed persons unit 12",
+          "unit_12_calendar": "Occupancy calendar unit 12",
+          "unit_13_name": "Unit 13 name",
+          "unit_13_area_sqm": "Unit 13 floor area",
+          "unit_13_fixed_persons": "Fixed persons unit 13",
+          "unit_13_calendar": "Occupancy calendar unit 13",
+          "unit_14_name": "Unit 14 name",
+          "unit_14_area_sqm": "Unit 14 floor area",
+          "unit_14_fixed_persons": "Fixed persons unit 14",
+          "unit_14_calendar": "Occupancy calendar unit 14",
+          "unit_15_name": "Unit 15 name",
+          "unit_15_area_sqm": "Unit 15 floor area",
+          "unit_15_fixed_persons": "Fixed persons unit 15",
+          "unit_15_calendar": "Occupancy calendar unit 15",
+          "unit_16_name": "Unit 16 name",
+          "unit_16_area_sqm": "Unit 16 floor area",
+          "unit_16_fixed_persons": "Fixed persons unit 16",
+          "unit_16_calendar": "Occupancy calendar unit 16",
+          "unit_17_name": "Unit 17 name",
+          "unit_17_area_sqm": "Unit 17 floor area",
+          "unit_17_fixed_persons": "Fixed persons unit 17",
+          "unit_17_calendar": "Occupancy calendar unit 17",
+          "unit_18_name": "Unit 18 name",
+          "unit_18_area_sqm": "Unit 18 floor area",
+          "unit_18_fixed_persons": "Fixed persons unit 18",
+          "unit_18_calendar": "Occupancy calendar unit 18",
+          "unit_19_name": "Unit 19 name",
+          "unit_19_area_sqm": "Unit 19 floor area",
+          "unit_19_fixed_persons": "Fixed persons unit 19",
+          "unit_19_calendar": "Occupancy calendar unit 19",
+          "unit_20_name": "Unit 20 name",
+          "unit_20_area_sqm": "Unit 20 floor area",
+          "unit_20_fixed_persons": "Fixed persons unit 20",
+          "unit_20_calendar": "Occupancy calendar unit 20",
+          "unit_21_name": "Unit 21 name",
+          "unit_21_area_sqm": "Unit 21 floor area",
+          "unit_21_fixed_persons": "Fixed persons unit 21",
+          "unit_21_calendar": "Occupancy calendar unit 21",
+          "unit_22_name": "Unit 22 name",
+          "unit_22_area_sqm": "Unit 22 floor area",
+          "unit_22_fixed_persons": "Fixed persons unit 22",
+          "unit_22_calendar": "Occupancy calendar unit 22",
+          "unit_23_name": "Unit 23 name",
+          "unit_23_area_sqm": "Unit 23 floor area",
+          "unit_23_fixed_persons": "Fixed persons unit 23",
+          "unit_23_calendar": "Occupancy calendar unit 23",
+          "unit_24_name": "Unit 24 name",
+          "unit_24_area_sqm": "Unit 24 floor area",
+          "unit_24_fixed_persons": "Fixed persons unit 24",
+          "unit_24_calendar": "Occupancy calendar unit 24",
+          "unit_25_name": "Unit 25 name",
+          "unit_25_area_sqm": "Unit 25 floor area",
+          "unit_25_fixed_persons": "Fixed persons unit 25",
+          "unit_25_calendar": "Occupancy calendar unit 25",
+          "unit_26_name": "Unit 26 name",
+          "unit_26_area_sqm": "Unit 26 floor area",
+          "unit_26_fixed_persons": "Fixed persons unit 26",
+          "unit_26_calendar": "Occupancy calendar unit 26",
+          "unit_27_name": "Unit 27 name",
+          "unit_27_area_sqm": "Unit 27 floor area",
+          "unit_27_fixed_persons": "Fixed persons unit 27",
+          "unit_27_calendar": "Occupancy calendar unit 27",
+          "unit_28_name": "Unit 28 name",
+          "unit_28_area_sqm": "Unit 28 floor area",
+          "unit_28_fixed_persons": "Fixed persons unit 28",
+          "unit_28_calendar": "Occupancy calendar unit 28",
+          "unit_29_name": "Unit 29 name",
+          "unit_29_area_sqm": "Unit 29 floor area",
+          "unit_29_fixed_persons": "Fixed persons unit 29",
+          "unit_29_calendar": "Occupancy calendar unit 29",
+          "unit_30_name": "Unit 30 name",
+          "unit_30_area_sqm": "Unit 30 floor area",
+          "unit_30_fixed_persons": "Fixed persons unit 30",
+          "unit_30_calendar": "Occupancy calendar unit 30"
+        }
+      },
+      "sensors": {
+        "title": "Select sensors",
+        "description": "Wähle Verbrauchs-, Temperatur- und Wetterdaten. Optional kann ein separater Heiz- und Warmwasser-Tagesverbrauch gewählt werden. Die Heizgrenze bestimmt, ab welcher Tagesdurchschnittstemperatur nur noch Warmwasser angenommen wird.",
+        "data": {
+          "heatpump_daily_energy_sensor": "Heat pump daily consumption sensor (recommended)",
+          "heatpump_total_energy_sensor": "Heat pump total meter / accumulated (optional)",
+          "outdoor_temp_sensor": "Outdoor temperature sensor",
+          "weather_entity": "Weather entity for forecast",
+          "heating_threshold_temp": "Heizgrenze / Sommerbetrieb-Schwelle",
+          "heating_daily_energy_sensor": "Tagesverbrauch Heizung (optional)",
+          "dhw_daily_energy_sensor": "Tagesverbrauch Warmwasser (optional)"
+        }
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Change sensor mapping",
+        "description": "Passe Sensoren, Heizgrenze und optionale getrennte Tagesverbräuche an.",
+        "data": {
+          "heatpump_daily_energy_sensor": "Heat pump daily consumption sensor",
+          "heatpump_total_energy_sensor": "Heat pump total meter / accumulated",
+          "outdoor_temp_sensor": "Outdoor temperature sensor",
+          "weather_entity": "Weather entity for forecast",
+          "heating_threshold_temp": "Heizgrenze / Sommerbetrieb-Schwelle",
+          "heating_daily_energy_sensor": "Tagesverbrauch Heizung (optional)",
+          "dhw_daily_energy_sensor": "Tagesverbrauch Warmwasser (optional)"
+        }
+      }
+    }
+  },
+  "selector": {
+    "building_type": {
+      "options": {
+        "residential": "Residential house",
+        "vacation": "Vacation rental",
+        "apartment_house": "Apartment house / multiple dwelling units",
+        "other": "Other"
+      }
+    },
+    "person_model": {
+      "options": {
+        "none": "Do not consider",
+        "fixed": "Fixed number of persons",
+        "calendar": "Use calendar / occupancy per dwelling unit"
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "tomorrow_kwh": {
+        "name": "Consumption tomorrow"
+      },
+      "confidence": {
+        "name": "Forecast confidence"
+      },
+      "reason": {
+        "name": "Forecast basis"
+      },
+      "day_after_tomorrow_kwh": {
+        "name": "Consumption day after tomorrow"
+      },
+      "rest_today_kwh": {
+        "name": "Remaining day forecast"
+      },
+      "training_samples": {
+        "name": "Collected Daily Data"
+      },
+      "last_training_sample": {
+        "name": "Last Training Sample"
+      },
+      "training_status": {
+        "name": "Training Status"
+      },
+      "data_quality": {
+        "name": "Data Quality"
+      }
+    }
+  }
+}

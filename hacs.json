@@ -1,0 +1,9 @@
+{
+  "name": "HA Heat Pump Consumption Forecast",
+  "render_readme": true,
+  "domains": [
+    "sensor",
+    "weather"
+  ],
+  "homeassistant": "2024.10.0"
+}

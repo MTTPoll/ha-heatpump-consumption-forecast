@@ -1,0 +1,13 @@
+{
+  "domain": "heatpump_consumption_forecast",
+  "name": "Heat Pump Consumption Forecast",
+  "codeowners": [
+    "@MTTPoll"
+  ],
+  "config_flow": true,
+  "documentation": "https://github.com/MTTPoll/heatpump-consumption-forecast",
+  "iot_class": "local_polling",
+  "issue_tracker": "https://github.com/MTTPoll/heatpump-consumption-forecast/issues",
+  "requirements": [],
+  "version": "0.8.0"
+}

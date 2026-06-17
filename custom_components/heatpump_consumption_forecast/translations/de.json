@@ -1,0 +1,223 @@
+{
+  "title": "Wärmepumpen-Verbrauchsprognose",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Wärmepumpen-Verbrauchsprognose einrichten",
+        "description": "Wähle Gebäudetyp, Anzahl Wohneinheiten und ob Belegung oder feste Personenzahlen berücksichtigt werden sollen.",
+        "data": {
+          "name": "Name",
+          "building_type": "Gebäudetyp",
+          "unit_count": "Anzahl Wohneinheiten",
+          "person_model": "Personenmodell",
+          "has_occupancy_calendars": "Belegungskalender verwenden",
+          "fixed_persons": "Feste Personenzahl gesamt"
+        }
+      },
+      "units": {
+        "title": "Wohneinheiten konfigurieren",
+        "description": "Lege Name, Wohnfläche und optional feste Personen oder Kalender je Wohneinheit fest.",
+        "data": {
+          "unit_1_name": "Name Wohneinheit 1",
+          "unit_1_area_sqm": "Wohnfläche Wohneinheit 1",
+          "unit_1_fixed_persons": "Feste Personen Wohneinheit 1",
+          "unit_1_calendar": "Belegungskalender Wohneinheit 1",
+          "unit_2_name": "Name Wohneinheit 2",
+          "unit_2_area_sqm": "Wohnfläche Wohneinheit 2",
+          "unit_2_fixed_persons": "Feste Personen Wohneinheit 2",
+          "unit_2_calendar": "Belegungskalender Wohneinheit 2",
+          "unit_3_name": "Name Wohneinheit 3",
+          "unit_3_area_sqm": "Wohnfläche Wohneinheit 3",
+          "unit_3_fixed_persons": "Feste Personen Wohneinheit 3",
+          "unit_3_calendar": "Belegungskalender Wohneinheit 3",
+          "unit_4_name": "Name Wohneinheit 4",
+          "unit_4_area_sqm": "Wohnfläche Wohneinheit 4",
+          "unit_4_fixed_persons": "Feste Personen Wohneinheit 4",
+          "unit_4_calendar": "Belegungskalender Wohneinheit 4",
+          "unit_5_name": "Name Wohneinheit 5",
+          "unit_5_area_sqm": "Wohnfläche Wohneinheit 5",
+          "unit_5_fixed_persons": "Feste Personen Wohneinheit 5",
+          "unit_5_calendar": "Belegungskalender Wohneinheit 5",
+          "unit_6_name": "Name Wohneinheit 6",
+          "unit_6_area_sqm": "Wohnfläche Wohneinheit 6",
+          "unit_6_fixed_persons": "Feste Personen Wohneinheit 6",
+          "unit_6_calendar": "Belegungskalender Wohneinheit 6",
+          "unit_7_name": "Name Wohneinheit 7",
+          "unit_7_area_sqm": "Wohnfläche Wohneinheit 7",
+          "unit_7_fixed_persons": "Feste Personen Wohneinheit 7",
+          "unit_7_calendar": "Belegungskalender Wohneinheit 7",
+          "unit_8_name": "Name Wohneinheit 8",
+          "unit_8_area_sqm": "Wohnfläche Wohneinheit 8",
+          "unit_8_fixed_persons": "Feste Personen Wohneinheit 8",
+          "unit_8_calendar": "Belegungskalender Wohneinheit 8",
+          "unit_9_name": "Name Wohneinheit 9",
+          "unit_9_area_sqm": "Wohnfläche Wohneinheit 9",
+          "unit_9_fixed_persons": "Feste Personen Wohneinheit 9",
+          "unit_9_calendar": "Belegungskalender Wohneinheit 9",
+          "unit_10_name": "Name Wohneinheit 10",
+          "unit_10_area_sqm": "Wohnfläche Wohneinheit 10",
+          "unit_10_fixed_persons": "Feste Personen Wohneinheit 10",
+          "unit_10_calendar": "Belegungskalender Wohneinheit 10",
+          "unit_11_name": "Name Wohneinheit 11",
+          "unit_11_area_sqm": "Wohnfläche Wohneinheit 11",
+          "unit_11_fixed_persons": "Feste Personen Wohneinheit 11",
+          "unit_11_calendar": "Belegungskalender Wohneinheit 11",
+          "unit_12_name": "Name Wohneinheit 12",
+          "unit_12_area_sqm": "Wohnfläche Wohneinheit 12",
+          "unit_12_fixed_persons": "Feste Personen Wohneinheit 12",
+          "unit_12_calendar": "Belegungskalender Wohneinheit 12",
+          "unit_13_name": "Name Wohneinheit 13",
+          "unit_13_area_sqm": "Wohnfläche Wohneinheit 13",
+          "unit_13_fixed_persons": "Feste Personen Wohneinheit 13",
+          "unit_13_calendar": "Belegungskalender Wohneinheit 13",
+          "unit_14_name": "Name Wohneinheit 14",
+          "unit_14_area_sqm": "Wohnfläche Wohneinheit 14",
+          "unit_14_fixed_persons": "Feste Personen Wohneinheit 14",
+          "unit_14_calendar": "Belegungskalender Wohneinheit 14",
+          "unit_15_name": "Name Wohneinheit 15",
+          "unit_15_area_sqm": "Wohnfläche Wohneinheit 15",
+          "unit_15_fixed_persons": "Feste Personen Wohneinheit 15",
+          "unit_15_calendar": "Belegungskalender Wohneinheit 15",
+          "unit_16_name": "Name Wohneinheit 16",
+          "unit_16_area_sqm": "Wohnfläche Wohneinheit 16",
+          "unit_16_fixed_persons": "Feste Personen Wohneinheit 16",
+          "unit_16_calendar": "Belegungskalender Wohneinheit 16",
+          "unit_17_name": "Name Wohneinheit 17",
+          "unit_17_area_sqm": "Wohnfläche Wohneinheit 17",
+          "unit_17_fixed_persons": "Feste Personen Wohneinheit 17",
+          "unit_17_calendar": "Belegungskalender Wohneinheit 17",
+          "unit_18_name": "Name Wohneinheit 18",
+          "unit_18_area_sqm": "Wohnfläche Wohneinheit 18",
+          "unit_18_fixed_persons": "Feste Personen Wohneinheit 18",
+          "unit_18_calendar": "Belegungskalender Wohneinheit 18",
+          "unit_19_name": "Name Wohneinheit 19",
+          "unit_19_area_sqm": "Wohnfläche Wohneinheit 19",
+          "unit_19_fixed_persons": "Feste Personen Wohneinheit 19",
+          "unit_19_calendar": "Belegungskalender Wohneinheit 19",
+          "unit_20_name": "Name Wohneinheit 20",
+          "unit_20_area_sqm": "Wohnfläche Wohneinheit 20",
+          "unit_20_fixed_persons": "Feste Personen Wohneinheit 20",
+          "unit_20_calendar": "Belegungskalender Wohneinheit 20",
+          "unit_21_name": "Name Wohneinheit 21",
+          "unit_21_area_sqm": "Wohnfläche Wohneinheit 21",
+          "unit_21_fixed_persons": "Feste Personen Wohneinheit 21",
+          "unit_21_calendar": "Belegungskalender Wohneinheit 21",
+          "unit_22_name": "Name Wohneinheit 22",
+          "unit_22_area_sqm": "Wohnfläche Wohneinheit 22",
+          "unit_22_fixed_persons": "Feste Personen Wohneinheit 22",
+          "unit_22_calendar": "Belegungskalender Wohneinheit 22",
+          "unit_23_name": "Name Wohneinheit 23",
+          "unit_23_area_sqm": "Wohnfläche Wohneinheit 23",
+          "unit_23_fixed_persons": "Feste Personen Wohneinheit 23",
+          "unit_23_calendar": "Belegungskalender Wohneinheit 23",
+          "unit_24_name": "Name Wohneinheit 24",
+          "unit_24_area_sqm": "Wohnfläche Wohneinheit 24",
+          "unit_24_fixed_persons": "Feste Personen Wohneinheit 24",
+          "unit_24_calendar": "Belegungskalender Wohneinheit 24",
+          "unit_25_name": "Name Wohneinheit 25",
+          "unit_25_area_sqm": "Wohnfläche Wohneinheit 25",
+          "unit_25_fixed_persons": "Feste Personen Wohneinheit 25",
+          "unit_25_calendar": "Belegungskalender Wohneinheit 25",
+          "unit_26_name": "Name Wohneinheit 26",
+          "unit_26_area_sqm": "Wohnfläche Wohneinheit 26",
+          "unit_26_fixed_persons": "Feste Personen Wohneinheit 26",
+          "unit_26_calendar": "Belegungskalender Wohneinheit 26",
+          "unit_27_name": "Name Wohneinheit 27",
+          "unit_27_area_sqm": "Wohnfläche Wohneinheit 27",
+          "unit_27_fixed_persons": "Feste Personen Wohneinheit 27",
+          "unit_27_calendar": "Belegungskalender Wohneinheit 27",
+          "unit_28_name": "Name Wohneinheit 28",
+          "unit_28_area_sqm": "Wohnfläche Wohneinheit 28",
+          "unit_28_fixed_persons": "Feste Personen Wohneinheit 28",
+          "unit_28_calendar": "Belegungskalender Wohneinheit 28",
+          "unit_29_name": "Name Wohneinheit 29",
+          "unit_29_area_sqm": "Wohnfläche Wohneinheit 29",
+          "unit_29_fixed_persons": "Feste Personen Wohneinheit 29",
+          "unit_29_calendar": "Belegungskalender Wohneinheit 29",
+          "unit_30_name": "Name Wohneinheit 30",
+          "unit_30_area_sqm": "Wohnfläche Wohneinheit 30",
+          "unit_30_fixed_persons": "Feste Personen Wohneinheit 30",
+          "unit_30_calendar": "Belegungskalender Wohneinheit 30"
+        }
+      },
+      "sensors": {
+        "title": "Sensoren auswählen",
+        "description": "Wähle Verbrauchs-, Temperatur- und Wetterdaten. Optional kann ein separater Heiz- und Warmwasser-Tagesverbrauch gewählt werden. Die Heizgrenze bestimmt, ab welcher Tagesdurchschnittstemperatur nur noch Warmwasser angenommen wird.",
+        "data": {
+          "heatpump_daily_energy_sensor": "Wärmepumpen-Tagesverbrauchssensor (empfohlen)",
+          "heatpump_total_energy_sensor": "Wärmepumpen-Gesamtzähler / accumulated (optional)",
+          "outdoor_temp_sensor": "Außentemperatur-Sensor",
+          "weather_entity": "Wetter-Entität für Vorhersage",
+          "heating_threshold_temp": "Heizgrenze / Sommerbetrieb-Schwelle",
+          "heating_daily_energy_sensor": "Tagesverbrauch Heizung (optional)",
+          "dhw_daily_energy_sensor": "Tagesverbrauch Warmwasser (optional)"
+        }
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Sensorzuordnung ändern",
+        "description": "Passe Sensoren, Heizgrenze und optionale getrennte Tagesverbräuche an.",
+        "data": {
+          "heatpump_daily_energy_sensor": "Wärmepumpen-Tagesverbrauchssensor",
+          "heatpump_total_energy_sensor": "Wärmepumpen-Gesamtzähler / accumulated",
+          "outdoor_temp_sensor": "Außentemperatur-Sensor",
+          "weather_entity": "Wetter-Entität für Vorhersage",
+          "heating_threshold_temp": "Heizgrenze / Sommerbetrieb-Schwelle",
+          "heating_daily_energy_sensor": "Tagesverbrauch Heizung (optional)",
+          "dhw_daily_energy_sensor": "Tagesverbrauch Warmwasser (optional)"
+        }
+      }
+    }
+  },
+  "selector": {
+    "building_type": {
+      "options": {
+        "residential": "Wohnhaus",
+        "vacation": "Ferienhaus / Vermietung",
+        "apartment_house": "Mietshaus / mehrere Wohneinheiten",
+        "other": "Sonstiges"
+      }
+    },
+    "person_model": {
+      "options": {
+        "none": "Nicht berücksichtigen",
+        "fixed": "Feste Personenzahl",
+        "calendar": "Kalender / Belegung je Wohneinheit verwenden"
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "tomorrow_kwh": {
+        "name": "Verbrauch morgen"
+      },
+      "confidence": {
+        "name": "Prognosegüte"
+      },
+      "reason": {
+        "name": "Prognosegrundlage"
+      },
+      "day_after_tomorrow_kwh": {
+        "name": "Verbrauch übermorgen"
+      },
+      "rest_today_kwh": {
+        "name": "Rest-Tagesprognose"
+      },
+      "training_samples": {
+        "name": "Gesammelte Tagesdaten"
+      },
+      "last_training_sample": {
+        "name": "Letzter Trainingsdatensatz"
+      },
+      "training_status": {
+        "name": "Trainingsstatus"
+      },
+      "data_quality": {
+        "name": "Datenqualität"
+      }
+    }
+  }
+}
