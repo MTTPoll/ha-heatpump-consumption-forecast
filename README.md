@@ -33,7 +33,7 @@ Aktuelle Version: **v0.8.0**
 4. Repository-URL einfügen:
 
    ```text
-   https://github.com/MTTPoll/heatpump-consumption-forecast
+   https://github.com/MTTPoll/ha-heatpump-consumption-forecast
    ```
 
 5. Kategorie **Integration** auswählen.
