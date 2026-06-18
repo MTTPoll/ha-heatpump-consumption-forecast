@@ -270,6 +270,170 @@ def _plausible_forecast(value: float | None, rule_value: float | None) -> bool:
     return value_f <= max(80.0, rule_f * 3.0) and value_f >= max(0.0, rule_f * 0.15)
 
 
+
+def _safe_error_percent(actual: float | None, forecast: float | None) -> float | None:
+    """Return absolute forecast error in percent."""
+    actual_f = _to_float(actual)
+    forecast_f = _to_float(forecast)
+    if actual_f is None or forecast_f is None or actual_f <= 0:
+        return None
+    return abs(actual_f - forecast_f) / actual_f * 100.0
+
+
+def _forecast_quality_metrics(samples: list[dict[str, Any]]) -> dict[str, Any]:
+    """Calculate forecast-quality metrics from completed samples."""
+    rows: list[dict[str, Any]] = []
+    for sample in samples or []:
+        if not sample.get("completed"):
+            continue
+        actual = _to_float(sample.get("actual_total_kwh_final"))
+        forecast = _to_float(sample.get("forecast_today_kwh"))
+        if actual is None or forecast is None or actual <= 0:
+            continue
+        error = actual - forecast
+        rows.append({
+            "date": sample.get("date"),
+            "actual_kwh": round(actual, 3),
+            "forecast_kwh": round(forecast, 3),
+            "error_kwh": round(error, 3),
+            "abs_error_kwh": round(abs(error), 3),
+            "error_percent": round(abs(error) / actual * 100.0, 2),
+        })
+
+    def _window(window_rows: list[dict[str, Any]]) -> dict[str, Any]:
+        count = len(window_rows)
+        if not count:
+            return {"sample_count": 0, "mae_kwh": None, "mape_percent": None, "rmse_kwh": None}
+        abs_errors = [float(row["abs_error_kwh"]) for row in window_rows]
+        pct_errors = [float(row["error_percent"]) for row in window_rows]
+        sq_errors = [float(row["error_kwh"]) ** 2 for row in window_rows]
+        return {
+            "sample_count": count,
+            "mae_kwh": round(sum(abs_errors) / count, 3),
+            "mape_percent": round(sum(pct_errors) / count, 2),
+            "rmse_kwh": round((sum(sq_errors) / count) ** 0.5, 3),
+        }
+
+    all_metrics = _window(rows)
+    last_7 = _window(rows[-7:])
+    last_30 = _window(rows[-30:])
+    last_90 = _window(rows[-90:])
+    mape = last_30.get("mape_percent") if last_30.get("sample_count") else all_metrics.get("mape_percent")
+    if mape is None:
+        quality_label = "Keine Bewertung"
+    elif mape <= 15:
+        quality_label = "Sehr gut"
+    elif mape <= 25:
+        quality_label = "Gut"
+    elif mape <= 40:
+        quality_label = "Ausreichend"
+    else:
+        quality_label = "Schwach"
+    return {
+        "available": bool(rows),
+        "sample_count": len(rows),
+        "quality_label": quality_label,
+        "latest": rows[-1] if rows else None,
+        "last_7": last_7,
+        "last_30": last_30,
+        "last_90": last_90,
+        "all": all_metrics,
+        "history_last_30": rows[-30:],
+    }
+
+
+
+def _learning_analysis_series(
+    samples: list[dict[str, Any]],
+    heating_curve: dict[str, Any],
+    forecast_quality: dict[str, Any],
+    ml_status: dict[str, Any],
+    model_selection: dict[str, Any],
+) -> dict[str, Any]:
+    """Build compact chart-friendly learning analysis series for HA dashboards."""
+    completed = [s for s in samples or [] if isinstance(s, dict) and s.get("completed")]
+    completed_sorted = sorted(completed, key=lambda item: str(item.get("date") or ""))
+
+    learning_progress_series: list[dict[str, Any]] = []
+    for idx, sample in enumerate(completed_sorted[-90:], start=max(1, len(completed_sorted[-90:]) - len(completed_sorted[-90:]) + 1)):
+        learning_progress_series.append({
+            "date": sample.get("date"),
+            "completed_days": max(0, len(completed_sorted) - len(completed_sorted[-90:])) + idx,
+            "forecast_model": sample.get("selected_model") or sample.get("forecast_model") or sample.get("source") or "Regelmodell",
+            "ml_status": "Optimiert" if max(0, len(completed_sorted) - len(completed_sorted[-90:])) + idx >= ML_OPTIMIZED_DAYS else "Aktiv" if max(0, len(completed_sorted) - len(completed_sorted[-90:])) + idx >= ML_MINIMUM_DAYS else "Wartet auf Trainingsdaten",
+        })
+
+    forecast_error_series = (forecast_quality or {}).get("history_last_30") or []
+
+    heating_curve_series: list[dict[str, Any]] = []
+    for pair in (heating_curve or {}).get("pairs_last_30") or []:
+        heating_curve_series.append({
+            "temperature_c": pair.get("temperature_c"),
+            "heating_kwh": pair.get("heating_kwh"),
+        })
+
+    ml_quality_series = [
+        {"window": "last_7", **((forecast_quality or {}).get("last_7") or {})},
+        {"window": "last_30", **((forecast_quality or {}).get("last_30") or {})},
+        {"window": "last_90", **((forecast_quality or {}).get("last_90") or {})},
+        {"window": "all", **((forecast_quality or {}).get("all") or {})},
+    ]
+
+    model_selection_series = []
+    if learning_progress_series:
+        for row in learning_progress_series[-30:]:
+            completed_days = int(row.get("completed_days") or 0)
+            model_selection_series.append({
+                "date": row.get("date"),
+                "completed_days": completed_days,
+                "model": "Regelmodell" if completed_days < ML_MINIMUM_DAYS else (model_selection or {}).get("mode", "ML + Fallback"),
+                "ml_allowed": completed_days >= ML_MINIMUM_DAYS,
+            })
+    else:
+        model_selection_series.append({
+            "date": None,
+            "completed_days": len(completed_sorted),
+            "model": (model_selection or {}).get("mode", "Regelmodell"),
+            "ml_allowed": bool((model_selection or {}).get("ml_allowed")),
+        })
+
+    return {
+        "available": bool(completed_sorted or forecast_error_series or heating_curve_series),
+        "completed_days": len(completed_sorted),
+        "learning_progress_series": learning_progress_series,
+        "forecast_error_series": forecast_error_series,
+        "heating_curve_series": heating_curve_series,
+        "ml_quality_series": ml_quality_series,
+        "model_selection_series": model_selection_series,
+        "dashboard_hint": "Diese Attribute sind für ApexCharts, Plotly oder History-Dashboard-Karten gedacht.",
+    }
+
+
+def _select_model_strategy(ml_status: dict[str, Any], quality: dict[str, Any]) -> dict[str, Any]:
+    """Return the automatic model selection strategy."""
+    if not ml_status.get("active"):
+        return {
+            "mode": "Regelmodell",
+            "ml_allowed": False,
+            "reason": "ML wartet auf ausreichend abgeschlossene Trainingsdaten.",
+        }
+    sample_count = int((quality or {}).get("sample_count") or 0)
+    if sample_count < 7:
+        return {
+            "mode": "ML + Fallback",
+            "ml_allowed": True,
+            "reason": "ML ist aktiv, aber die Qualitätsbewertung hat noch weniger als 7 Vergleichstage.",
+        }
+    mape = ((quality.get("last_30") or {}).get("mape_percent") or (quality.get("all") or {}).get("mape_percent"))
+    if mape is None:
+        return {"mode": "ML + Fallback", "ml_allowed": True, "reason": "Noch keine belastbare Fehlerquote verfügbar."}
+    if float(mape) <= 25:
+        return {"mode": "ML bevorzugt", "ml_allowed": True, "reason": f"ML-Qualität ist gut genug (MAPE {mape}%)."}
+    if float(mape) <= 40:
+        return {"mode": "ML + Fallback", "ml_allowed": True, "reason": f"ML wird nur mit Plausibilitätsprüfung genutzt (MAPE {mape}%)."}
+    return {"mode": "Regelmodell bevorzugt", "ml_allowed": False, "reason": f"Regelmodell wird bevorzugt, weil die bisherige Fehlerquote hoch ist (MAPE {mape}%)."}
+
+
 class HeatPumpForecastCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     """Coordinator calculating forecast values."""
 
@@ -664,10 +828,13 @@ class HeatPumpForecastCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         completed_samples = completed_training_samples(training_samples)
         pending_samples = [s for s in training_samples if not s.get("completed")]
         ml_status = await self._async_train_ml(training_samples)
+        forecast_quality = _forecast_quality_metrics(completed_samples)
+        model_selection = _select_model_strategy(ml_status, forecast_quality)
+        learning_analysis = _learning_analysis_series(training_samples, heating_curve, forecast_quality, ml_status, model_selection)
 
         def _ml_value(day_offset: int, avg_temp: float | None, occ: OccupancyInfo, rule_value: float) -> tuple[float, str, dict[str, Any] | None]:
-            if not ml_status.get("active"):
-                return rule_value, "Regelmodell", None
+            if not ml_status.get("active") or not model_selection.get("ml_allowed"):
+                return rule_value, model_selection.get("mode") or "Regelmodell", None
             day = dt_util.now().date() + timedelta(days=day_offset)
             features = build_ml_features(avg_temperature_c=avg_temp, persons=occ.persons, occupied_units=occ.occupied_units, occupied_area_sqm=occ.occupied_area_sqm or occ.total_area_sqm, month=day.month, weekday=day.weekday(), heating_basis_kwh=heating_baseline, dhw_basis_kwh=dhw_baseline)
             prediction = self._ml_model.predict(features)
@@ -677,16 +844,19 @@ class HeatPumpForecastCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         tomorrow, tomorrow_model, tomorrow_ml = _ml_value(1, tomorrow_avg_temp, tomorrow_occ, rule_tomorrow)
         day_after, day_after_model, day_after_ml = _ml_value(2, day_after_avg_temp, day_after_occ, rule_day_after)
-        forecast_model = "ML-Modell" if tomorrow_model == "ML-Modell" and day_after_model == "ML-Modell" else ("ML + Fallback" if ml_status.get("active") else "Regelmodell")
+        if not model_selection.get("ml_allowed"):
+            forecast_model = model_selection.get("mode") or "Regelmodell"
+        else:
+            forecast_model = "ML-Modell" if tomorrow_model == "ML-Modell" and day_after_model == "ML-Modell" else "ML + Fallback"
 
         completed_count = len(completed_samples)
         confidence_label, confidence_stage = ("Unzureichend", 1) if completed_count < 7 else ("Schwach", 2) if completed_count < 15 else ("Ausreichend", 3) if completed_count < 30 else ("Gut", 4) if completed_count < 90 else ("Sehr gut", 5)
         confidence = min(90, 30 + (25 if source == "daily_history" else 15) + (10 if temp_history.get("available") else 5 if current_temp is not None else 0) + (10 if forecast_temps.get(1) is not None else 0) + (5 if forecast_temps.get(2) is not None else 0) + (5 if units else 0) + (5 if heating_entity or dhw_entity else 0) + (5 if ml_status.get("active") else 0))
         reason_summary = " + ".join([forecast_model, _label_source(source), "Wetter", "Personen" if current_occ.total_units > 0 else "Heizgrenze", "Heizkurve" if heating_curve.get("active") else "Heizgrenze"])
-        reason_text = f"v0.9.0 | Prognosemodell: {forecast_model} | ML-Status: {ml_status.get('status')} | Datenbasis: {_label_source(source)} | Basis {baseline_kwh:.2f} kWh | Morgen Regelmodell {rule_tomorrow:.2f} kWh, final {tomorrow:.2f} kWh | Übermorgen Regelmodell {rule_day_after:.2f} kWh, final {day_after:.2f} kWh"
+        reason_text = f"v0.9.3 | Prognosemodell: {forecast_model} | ML-Status: {ml_status.get('status')} | Datenbasis: {_label_source(source)} | Basis {baseline_kwh:.2f} kWh | Morgen Regelmodell {rule_tomorrow:.2f} kWh, final {tomorrow:.2f} kWh | Übermorgen Regelmodell {rule_day_after:.2f} kWh, final {day_after:.2f} kWh"
 
         reason_structured = {
-            "version": "Basis v0.9.0", "source": source, "split_source": split_source, "forecast_model": forecast_model, "ml_status": ml_status,
+            "version": "Basis v0.9.3", "source": source, "split_source": split_source, "forecast_model": forecast_model, "ml_status": ml_status, "forecast_quality": forecast_quality, "model_selection": model_selection, "learning_analysis": learning_analysis,
             "today_so_far_kwh": round(today_so_far_kwh, 2) if today_so_far_kwh is not None else None,
             "today_heating_so_far_kwh": round(today_heating_so_far_kwh, 2) if today_heating_so_far_kwh is not None else None,
             "today_dhw_so_far_kwh": round(today_dhw_so_far_kwh, 2) if today_dhw_so_far_kwh is not None else None,
@@ -708,7 +878,7 @@ class HeatPumpForecastCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "training_latest_sample": training_sample, "training_last_7_samples": training_samples[-7:], "training_completed_last_7_samples": completed_samples[-7:],
             "storage_paths": self._storage_paths_attributes(),
             "storage_status": {"Speicherstatus": "OK", "Trainingsdaten_Datei_vorhanden": self._training_data_path.exists(), "Heizkurven_Datei_vorhanden": self._heating_curve_path.exists(), "ML_Modell_Datei_vorhanden": self._model_path.exists(), "Trainingsdaten_Datei": str(self._training_data_path), "Heizkurven_Datei": str(self._heating_curve_path), "ML_Modell_Datei": str(self._model_path), "Gesammelte_Tagesdaten_ML": len(training_samples), "Abgeschlossene_Tagesdaten_ML": len(completed_samples), "Offene_Tagesdaten_ML": len(pending_samples)},
-            "heating_curve": heating_curve, "ml_status": ml_status, "forecast_model": forecast_model,
+            "heating_curve": heating_curve, "ml_status": ml_status, "forecast_model": forecast_model, "forecast_quality": forecast_quality, "model_selection": model_selection, "learning_analysis": learning_analysis,
         }
 
 
@@ -728,6 +898,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         HeatPumpStorageStatusSensor(coordinator, entry),
         HeatPumpHeatingCurveStatusSensor(coordinator, entry),
         HeatPumpHeatingCurveSensor(coordinator, entry),
+        HeatPumpForecastEvaluationSensor(coordinator, entry),
+        HeatPumpMLDiagnosticsSensor(coordinator, entry),
+        HeatPumpMLQualitySensor(coordinator, entry),
+        HeatPumpModelSelectionSensor(coordinator, entry),
+        HeatPumpLearningAnalysisSensor(coordinator, entry),
+        HeatPumpForecastErrorHistorySensor(coordinator, entry),
+        HeatPumpHeatingCurveAnalysisSensor(coordinator, entry),
         HeatPumpMLStatusSensor(coordinator, entry),
         HeatPumpForecastModelSensor(coordinator, entry),
     ])
@@ -902,6 +1079,130 @@ class HeatPumpHeatingCurveStatusSensor(HeatPumpStringSensor):
 class HeatPumpHeatingCurveSensor(HeatPumpHeatingCurveStatusSensor):
     def __init__(self, coordinator: HeatPumpForecastCoordinator, entry: ConfigEntry) -> None:
         HeatPumpStringSensor.__init__(self, coordinator, entry, "heating_curve", "Erlernte Heizkurve", "mdi:chart-line")
+
+
+class HeatPumpForecastEvaluationSensor(HeatPumpStringSensor):
+    def __init__(self, coordinator: HeatPumpForecastCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, entry, "forecast_evaluation", "Prognosebewertung", "mdi:clipboard-check-outline")
+
+    @property
+    def native_value(self) -> str:
+        quality = self.coordinator.data.get("forecast_quality") or {}
+        latest = quality.get("latest") or {}
+        if not latest:
+            return "Noch keine Bewertung"
+        err = latest.get("abs_error_kwh")
+        pct = latest.get("error_percent")
+        return f"{err} kWh / {pct}%" if err is not None and pct is not None else "Noch keine Bewertung"
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        return self.coordinator.data.get("forecast_quality") or {}
+
+
+class HeatPumpMLDiagnosticsSensor(HeatPumpStringSensor):
+    def __init__(self, coordinator: HeatPumpForecastCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, entry, "ml_diagnostics", "ML-Diagnose", "mdi:brain")
+
+    @property
+    def native_value(self) -> str:
+        status = self.coordinator.data.get("ml_status") or {}
+        return status.get("status") or "Wartet auf Trainingsdaten"
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        return {
+            "ML_Status": self.coordinator.data.get("ml_status"),
+            "Modellwahl": self.coordinator.data.get("model_selection"),
+            "Prognosemodell": self.coordinator.data.get("forecast_model"),
+            "Trainingsdaten": {
+                "Gesammelt": self.coordinator.data.get("training_sample_count"),
+                "Abgeschlossen": self.coordinator.data.get("training_completed_sample_count"),
+                "Offen": self.coordinator.data.get("training_pending_sample_count"),
+            },
+            "Speicher": self.coordinator.data.get("storage_status"),
+        }
+
+
+class HeatPumpMLQualitySensor(HeatPumpStringSensor):
+    def __init__(self, coordinator: HeatPumpForecastCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, entry, "ml_quality", "ML-Qualität", "mdi:chart-timeline-variant")
+
+    @property
+    def native_value(self) -> str:
+        quality = self.coordinator.data.get("forecast_quality") or {}
+        return quality.get("quality_label") or "Keine Bewertung"
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        return self.coordinator.data.get("forecast_quality") or {}
+
+
+class HeatPumpModelSelectionSensor(HeatPumpStringSensor):
+    def __init__(self, coordinator: HeatPumpForecastCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, entry, "model_selection", "Automatische Modellwahl", "mdi:source-branch-sync")
+
+    @property
+    def native_value(self) -> str:
+        selection = self.coordinator.data.get("model_selection") or {}
+        return selection.get("mode") or "Regelmodell"
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        return self.coordinator.data.get("model_selection") or {}
+
+
+class HeatPumpLearningAnalysisSensor(HeatPumpStringSensor):
+    def __init__(self, coordinator: HeatPumpForecastCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, entry, "learning_analysis", "Lernanalyse", "mdi:chart-areaspline")
+
+    @property
+    def native_value(self) -> str:
+        analysis = self.coordinator.data.get("learning_analysis") or {}
+        completed = analysis.get("completed_days") or 0
+        return f"{completed} Tage" if completed else "Wird aufgebaut"
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        return self.coordinator.data.get("learning_analysis") or {}
+
+
+class HeatPumpForecastErrorHistorySensor(HeatPumpStringSensor):
+    def __init__(self, coordinator: HeatPumpForecastCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, entry, "forecast_error_history", "Prognosefehler Verlauf", "mdi:chart-timeline")
+
+    @property
+    def native_value(self) -> str:
+        series = ((self.coordinator.data.get("learning_analysis") or {}).get("forecast_error_series") or [])
+        return f"{len(series)} Werte" if series else "Keine Werte"
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        analysis = self.coordinator.data.get("learning_analysis") or {}
+        return {
+            "forecast_error_series": analysis.get("forecast_error_series"),
+            "ml_quality_series": analysis.get("ml_quality_series"),
+            "Hinweis": "Für grafische Auswertung in ApexCharts/Plotly geeignet.",
+        }
+
+
+class HeatPumpHeatingCurveAnalysisSensor(HeatPumpStringSensor):
+    def __init__(self, coordinator: HeatPumpForecastCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, entry, "heating_curve_analysis", "Heizkurvenanalyse Verlauf", "mdi:chart-scatter-plot")
+
+    @property
+    def native_value(self) -> str:
+        curve = self.coordinator.data.get("heating_curve") or {}
+        return curve.get("status") or "Wird aufgebaut"
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        analysis = self.coordinator.data.get("learning_analysis") or {}
+        return {
+            "heating_curve_series": analysis.get("heating_curve_series"),
+            "heating_curve": self.coordinator.data.get("heating_curve"),
+            "Hinweis": "Temperatur/Heizverbrauch-Punkte für grafische Heizkurvenanalyse.",
+        }
 
 
 class HeatPumpMLStatusSensor(HeatPumpStringSensor):

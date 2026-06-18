@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 DOMAIN = "heatpump_consumption_forecast"
-PLATFORMS = ["sensor"]
+PLATFORMS = ["sensor", "button"]
 
 CONF_BUILDING_TYPE = "building_type"
 CONF_PERSON_MODEL = "person_model"

@@ -12,6 +12,7 @@ from typing import Any
 import logging
 import math
 import pickle
+from datetime import datetime
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -151,6 +152,7 @@ class HeatPumpMLModel:
             "minimum_days": ML_MINIMUM_DAYS,
             "recommended_days": ML_OPTIMIZED_DAYS,
             "model_file": str(model_path),
+            "model_file_exists": model_path.exists(),
             "features": list(FEATURE_NAMES),
             "algorithm": ALGORITHM_NAME,
             "external_dependencies": [],
@@ -164,6 +166,8 @@ class HeatPumpMLModel:
                 "active": False,
                 "optimized": False,
                 "model_file_exists": model_path.exists(),
+                "usable_samples": completed_count,
+                "last_training": None,
                 "message": f"Sammelt Daten ({completed_count}/{ML_MINIMUM_DAYS})",
             }
 
@@ -188,6 +192,7 @@ class HeatPumpMLModel:
                 "optimized": False,
                 "usable_samples": len(vectors),
                 "model_file_exists": model_path.exists(),
+                "last_training": None,
                 "message": "Nicht genug verwendbare abgeschlossene Trainingsdaten.",
             }
 
@@ -208,6 +213,7 @@ class HeatPumpMLModel:
             "usable_samples": len(vectors),
             "model_type": "weighted_similarity",
             "nearest_neighbors": min(12, len(vectors)),
+            "last_training": datetime.now().isoformat(),
         }
         self._save_model(model_path)
         return {**self._metadata, "model_file_exists": model_path.exists()}
