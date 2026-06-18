@@ -1,21 +1,167 @@
 # Changelog
 
+All notable changes to this project will be documented in this file.
+
+---
+
+## v1.0.0
+
+### 🎉 First Public Release
+
+Heat Pump Consumption Forecast is now considered feature complete and ready for public testing and community feedback.
+
+This release introduces a fully local heat pump consumption forecasting system for Home Assistant without any cloud dependency.
+
+---
+
+### Added
+
+#### Forecasting
+
+- Consumption forecast for tomorrow
+- Consumption forecast for the day after tomorrow
+- Remaining consumption forecast until midnight
+- Weather-based consumption adjustments
+- Heating threshold support
+
+#### Occupancy Model
+
+- Person-based consumption model
+- Calendar-based occupancy support
+- Multiple dwelling units
+- Individual living area per dwelling unit
+- Support for:
+  - Residential homes
+  - Holiday homes
+  - Vacation apartments
+  - Multi-family buildings
+
+#### Consumption Analysis
+
+- Heating consumption analysis
+- Domestic hot water consumption analysis
+- Automatic heating / hot water split
+- Historical consumption learning
+
+#### Heating Curve
+
+- Automatic heating curve learning
+- Heating curve diagnostics
+- Heating curve status sensor
+- Learned heating curve sensor
+
+#### Local Machine Learning
+
+- Lightweight local similarity-based ML model
+- No external machine-learning dependencies
+- No scikit-learn required
+- Raspberry Pi friendly
+- Fully local operation
+- Persistent ML model storage
+
+#### Diagnostics
+
+- Forecast quality sensor
+- Data quality sensor
+- Training status sensor
+- ML status sensor
+- Forecast model sensor
+- Storage status sensor
+- Learning analysis sensor
+- Forecast error analysis
+
+#### Storage
+
+Persistent storage support:
+
+```text
+/config/.storage/heatpump_consumption_forecast/training_data.json
+/config/.storage/heatpump_consumption_forecast/heating_curve.json
+/config/.storage/heatpump_consumption_forecast/model.pkl
+```
+
+#### Safety
+
+- Rule-based forecast model always available
+- Automatic ML fallback handling
+- Protection against implausible forecasts
+- Automatic recovery from model failures
+- Automatic fallback when insufficient training data exists
+
+---
+
+### Machine Learning Logic
+
+#### 0–29 completed daily samples
+
+- Rule model active
+- ML collects data only
+
+#### 30–89 completed daily samples
+
+- ML becomes active
+- Local similarity model starts learning
+
+#### 90+ completed daily samples
+
+- ML status becomes optimized
+- Model quality improves over time
+
+---
+
+### Community Release Notes
+
+This release is intended to gather real-world feedback from different:
+
+- Heat pump systems
+- Building types
+- Climate regions
+- Occupancy patterns
+
+Community feedback will help improve future versions.
+
+---
+
+## v0.9.1
+
+- Removed scikit-learn dependency
+- Added lightweight local similarity model
+- Added ML status sensor
+- Added forecast model sensor
+- Added persistent model storage
+- Added automatic ML fallback
+
+---
+
+## v0.9.0
+
+- Introduced first ML framework
+- Added ML status sensor
+- Added forecast model sensor
+- Prepared ML training workflow
+
+---
+
+## v0.8.2
+
+- Persistent training data storage
+- Persistent heating curve storage
+- Storage status sensor
+
+---
+
 ## v0.8.0
 
-- Prognosegüte wird als fünfstufige Bewertung angezeigt: Unzureichend, Schwach, Ausreichend, Gut, Sehr gut.
-- Interne Bewertungswerte bleiben als Attribute erhalten.
-- Lernspeicher, Diagnose und Heizkurvenaufbau aus v0.7.x bleiben enthalten.
-- Noch kein aktives ML-Modell; v0.8.0 bereitet die ML-Auswertung weiter vor.
+- Forecast quality evaluation
+- Five-level forecast quality rating
+- Heating curve preparation improvements
 
-## v0.7.9
-
-- Diagnoseattribute klarer getrennt zwischen ML-Tagesdaten und historischen Heizkurven-Tagen.
-- `Gepaarte_Tage` in `Historische_Tage_Heizkurve` umbenannt.
+---
 
 ## v0.7.x
 
-- Lernspeicher für tägliche Trainingsdaten eingeführt.
-- Diagnose- und Trainingssensoren ergänzt.
-- Rest-Tagesprognose eingeführt.
-- Heizkurvenstatus und erlernte Heizkurve vorbereitet.
-- Recorder-Zugriffe stabilisiert.
+- Daily training storage
+- Training diagnostics
+- Remaining daily forecast
+- Initial heating curve implementation
+- Recorder integration improvements
