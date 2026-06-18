@@ -1,9 +1,15 @@
-# Heat Pump Consumption Forecast (ML)
+# Heat Pump Consumption Forecast
 
 [![HACS](https://img.shields.io/badge/HACS-Custom-blue.svg)](https://hacs.xyz/)
 [![Home Assistant](https://img.shields.io/badge/Home%20Assistant-2026.3+-41BDF5.svg)](https://www.home-assistant.io/)
 [![Version](https://img.shields.io/badge/version-v1.0.0-green.svg)]()
 [![License](https://img.shields.io/badge/license-MIT-green.svg)]()
+
+A fully local heat pump consumption forecast for Home Assistant.
+
+No cloud. No external services. No subscriptions.
+
+Designed for residential homes, holiday homes, vacation apartments, and multi-family buildings.
 
 ---
 
@@ -36,17 +42,14 @@ Es werden keine Cloud-Dienste verwendet.
 - Verbrauch morgen
 - Verbrauch übermorgen
 - Rest-Tagesprognose
-
-### Wetterintegration
-
-- Wettervorhersage
-- Außentemperatur
-- Heizgrenze
+- Wetterbasierte Prognose
+- Heizgrenzen-Unterstützung
 
 ### Belegungsmodell
 
 - Wohnhäuser
 - Ferienwohnungen
+- Ferienhäuser
 - Mehrfamilienhäuser
 - Mehrere Wohneinheiten
 - Individuelle Wohnflächen
@@ -60,20 +63,97 @@ Es werden keine Cloud-Dienste verwendet.
 - Automatische Verbrauchsaufteilung
 - Historische Lernfunktion
 
-### Machine Learning
+### Lokales Machine Learning
 
 - Lokales Ähnlichkeitsmodell
 - Selbstlernend
 - Keine externen ML-Abhängigkeiten
-- Raspberry Pi kompatibel
+- Raspberry-Pi kompatibel
 - Persistente Datenspeicherung
-- Regelmodell als permanenter Fallback
+- Permanenter Regelmodell-Fallback
 
 ---
 
-## ⚠️ Benötigte Sensoren
+# Installation
 
-### Mindestanforderungen
+## Installation über HACS (Empfohlen)
+
+### Repository hinzufügen
+
+1. HACS öffnen
+2. Oben rechts auf die drei Punkte klicken
+3. **Benutzerdefinierte Repositories**
+4. Repository hinzufügen:
+
+```text
+https://github.com/MTTPoll/ha-heatpump-consumption-forecast
+```
+
+5. Kategorie auswählen:
+
+```text
+Integration
+```
+
+6. Hinzufügen
+7. Installation starten
+8. Home Assistant neu starten
+
+### Integration hinzufügen
+
+Nach dem Neustart:
+
+```text
+Einstellungen → Geräte & Dienste
+```
+
+Integration hinzufügen:
+
+```text
+Heat Pump Consumption Forecast
+```
+
+---
+
+## Manuelle Installation
+
+Aktuelle Version herunterladen:
+
+```text
+https://github.com/MTTPoll/ha-heatpump-consumption-forecast/releases
+```
+
+Ordner:
+
+```text
+custom_components/heatpump_consumption_forecast
+```
+
+nach:
+
+```text
+/config/custom_components/heatpump_consumption_forecast
+```
+
+kopieren.
+
+Danach Home Assistant vollständig neu starten.
+
+Anschließend:
+
+```text
+Einstellungen → Geräte & Dienste
+```
+
+und die Integration hinzufügen.
+
+---
+
+# ⚠️ Vor der Installation
+
+Für eine sinnvolle Prognose sollten folgende Sensoren bereits vorhanden sein.
+
+## Mindestanforderungen
 
 | Sensor | Beschreibung |
 |----------|-------------|
@@ -81,7 +161,7 @@ Es werden keine Cloud-Dienste verwendet.
 | Außentemperatur | Aktuelle Außentemperatur |
 | Wetter-Entity | Wettervorhersage |
 
-### Empfohlen
+## Empfohlen
 
 | Sensor | Nutzen |
 |----------|---------|
@@ -112,21 +192,48 @@ utility_meter:
 
 ---
 
+## Erste Einrichtung Checkliste
+
+Vor der Konfiguration sollte vorhanden sein:
+
+✅ Tagesverbrauch Wärmepumpe
+
+✅ Außentemperatur-Sensor
+
+✅ Wetter-Entity
+
+Empfohlen:
+
+✅ Heizverbrauch täglich
+
+✅ Warmwasserverbrauch täglich
+
+✅ Gesamtverbrauch Wärmepumpe
+
+---
+
 ## ML-Logik
 
 ### 0–29 abgeschlossene Tagesdatensätze
 
 - Regelmodell aktiv
 - ML sammelt Daten
+- ML-Status: Wartet auf Trainingsdaten
+- Prognosemodell: Regelmodell
 
 ### 30–89 abgeschlossene Tagesdatensätze
 
 - ML wird aktiv
 - Lokales Modell wird erzeugt
+- Prognosemodell:
+  - ML-Modell
+  - ML + Fallback
 
 ### 90+ abgeschlossene Tagesdatensätze
 
 - ML wird optimiert
+- Heizkurve wird optimiert
+- Prognosequalität verbessert sich weiter
 
 ---
 
@@ -170,6 +277,7 @@ Automatischer Rückfall auf das Regelmodell bei:
 ### Training
 
 - Gesammelte Tagesdaten
+- Letzter Trainingsdatensatz
 - Trainingsstatus
 
 ### Machine Learning
@@ -182,29 +290,24 @@ Automatischer Rückfall auf das Regelmodell bei:
 - Heizkurvenstatus
 - Erlernte Heizkurve
 
-### Diagnose
+### Analyse
 
-- Speicherstatus
 - Lernanalyse
 - Prognosefehleranalyse
 
+### Diagnose
+
+- Speicherstatus
+
 ---
 
-## Installation über HACS
+## Unterstützte Gebäudetypen
 
-Repository hinzufügen:
-
-```text
-https://github.com/MTTPoll/ha-heatpump-consumption-forecast
-```
-
-Kategorie:
-
-```text
-Integration
-```
-
-Danach Home Assistant neu starten.
+- Einfamilienhäuser
+- Mehrfamilienhäuser
+- Ferienhäuser
+- Ferienwohnungen
+- Apartmenthäuser
 
 ---
 
@@ -232,26 +335,23 @@ No cloud services are required.
 
 ## Highlights
 
-### Forecasts
+### Forecasting
 
 - Tomorrow forecast
 - Day-after-tomorrow forecast
 - Remaining forecast for today
-
-### Weather Integration
-
-- Weather forecast
-- Outdoor temperature
-- Heating threshold
+- Weather-based prediction
+- Heating threshold support
 
 ### Occupancy Model
 
 - Residential homes
 - Holiday homes
+- Vacation apartments
 - Apartment buildings
 - Multiple dwelling units
 - Individual living areas
-- Calendar occupancy
+- Calendar-based occupancy
 - Person model
 
 ### Consumption Analysis
@@ -261,20 +361,93 @@ No cloud services are required.
 - Automatic consumption split
 - Historical learning
 
-### Machine Learning
+### Local Machine Learning
 
 - Local similarity model
 - Self-learning
 - No external ML dependencies
 - Raspberry Pi friendly
-- Persistent model storage
+- Persistent storage
 - Permanent rule-model fallback
 
 ---
 
-## ⚠️ Required Sensors
+# Installation
 
-### Minimum Requirements
+## Installation via HACS (Recommended)
+
+### Add Repository
+
+1. Open HACS
+2. Click the three dots in the upper-right corner
+3. Select **Custom Repositories**
+4. Add:
+
+```text
+https://github.com/MTTPoll/ha-heatpump-consumption-forecast
+```
+
+5. Select:
+
+```text
+Integration
+```
+
+6. Add repository
+7. Install integration
+8. Restart Home Assistant
+
+### Add Integration
+
+After restart:
+
+```text
+Settings → Devices & Services
+```
+
+Add:
+
+```text
+Heat Pump Consumption Forecast
+```
+
+---
+
+## Manual Installation
+
+Download the latest release:
+
+```text
+https://github.com/MTTPoll/ha-heatpump-consumption-forecast/releases
+```
+
+Copy:
+
+```text
+custom_components/heatpump_consumption_forecast
+```
+
+to:
+
+```text
+/config/custom_components/heatpump_consumption_forecast
+```
+
+Restart Home Assistant completely.
+
+Then add the integration through:
+
+```text
+Settings → Devices & Services
+```
+
+---
+
+# ⚠️ Before Installation
+
+For meaningful forecasts the following sensors should already exist.
+
+## Minimum Requirements
 
 | Sensor | Description |
 |----------|-------------|
@@ -282,12 +455,12 @@ No cloud services are required.
 | Outdoor Temperature Sensor | Current outdoor temperature |
 | Weather Entity | Weather forecast |
 
-### Recommended
+## Recommended
 
 | Sensor | Benefit |
 |----------|---------|
-| Daily Heating Energy | Better heating analysis |
-| Daily DHW Energy | Better hot water prediction |
+| Daily Heating Energy Sensor | Better heating analysis |
+| Daily Domestic Hot Water Sensor | Better DHW prediction |
 | Total Heat Pump Energy Meter | Additional validation |
 
 ---
@@ -313,6 +486,26 @@ utility_meter:
 
 ---
 
+## First-Time Setup Checklist
+
+Required:
+
+✅ Daily heat pump energy sensor
+
+✅ Outdoor temperature sensor
+
+✅ Weather entity
+
+Recommended:
+
+✅ Daily heating energy sensor
+
+✅ Daily DHW energy sensor
+
+✅ Total heat pump energy meter
+
+---
+
 ## Machine Learning Logic
 
 ### 0–29 completed daily samples
@@ -328,6 +521,7 @@ utility_meter:
 ### 90+ completed daily samples
 
 - ML becomes optimized
+- Heating curve becomes optimized
 
 ---
 
@@ -355,6 +549,56 @@ Automatic fallback to the rule model when:
 
 ---
 
+## Sensors
+
+### Forecast
+
+- Consumption Tomorrow
+- Consumption Day After Tomorrow
+- Remaining Forecast Today
+
+### Quality
+
+- Forecast Quality
+- Data Quality
+
+### Training
+
+- Collected Daily Data
+- Latest Training Sample
+- Training Status
+
+### Machine Learning
+
+- ML Status
+- Forecast Model
+
+### Heating Curve
+
+- Heating Curve Status
+- Learned Heating Curve
+
+### Analysis
+
+- Learning Analysis
+- Forecast Error Analysis
+
+### Diagnostics
+
+- Storage Status
+
+---
+
+## Supported Building Types
+
+- Residential homes
+- Multi-family homes
+- Holiday homes
+- Vacation apartments
+- Apartment buildings
+
+---
+
 ## Community Feedback
 
 This is the first public release.
@@ -364,7 +608,7 @@ Feedback regarding:
 - Forecast accuracy
 - ML behavior
 - Heating curve quality
-- Occupancy modeling
+- Occupancy model quality
 - Feature requests
 - Bugs
 
