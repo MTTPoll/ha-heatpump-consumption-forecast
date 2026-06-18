@@ -217,6 +217,9 @@
       },
       "data_quality": {
         "name": "Datenqualität"
+      },
+      "storage_status": {
+        "name": "Speicherstatus"
       }
     }
   }

@@ -4,8 +4,11 @@ from __future__ import annotations
 from dataclasses import dataclass, asdict
 from datetime import datetime, timedelta
 from statistics import mean
+import json
 import logging
+import os
 import re
+from pathlib import Path
 from typing import Any
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, SensorStateClass
@@ -16,7 +19,6 @@ from homeassistant.core import HomeAssistant
 from homeassistant.util import dt as dt_util
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
-from homeassistant.helpers.storage import Store
 
 from .const import (
     CONF_FIXED_PERSONS,
@@ -39,6 +41,10 @@ MWH_UNITS = {"mwh", "megawatt hour", "megawatt-hours"}
 ENERGY_UNITS = WH_UNITS | KWH_UNITS | MWH_UNITS
 STORAGE_VERSION = 1
 STORAGE_KEY_PREFIX = f"{DOMAIN}_training_data"
+STORAGE_DIR_NAME = DOMAIN
+TRAINING_DATA_FILE = "training_data.json"
+HEATING_CURVE_FILE = "heating_curve.json"
+MODEL_FILE = "model.pkl"
 MAX_TRAINING_SAMPLES = 370
 
 
@@ -345,38 +351,216 @@ class HeatPumpForecastCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.entry = entry
         self._last_total_kwh: float | None = None
         self._estimated_today_from_total = 0.0
-        self._store: Store = Store(hass, STORAGE_VERSION, f"{STORAGE_KEY_PREFIX}_{entry.entry_id}")
         self._training_samples: list[dict[str, Any]] | None = None
+        self._storage_dir = Path(hass.config.path(".storage", STORAGE_DIR_NAME))
+        self._training_data_path = self._storage_dir / TRAINING_DATA_FILE
+        self._heating_curve_path = self._storage_dir / HEATING_CURVE_FILE
+        self._model_path = self._storage_dir / MODEL_FILE
         super().__init__(hass, _LOGGER, name=DOMAIN, update_interval=timedelta(minutes=SCAN_INTERVAL_MINUTES))
 
+    def _storage_paths_attributes(self) -> dict[str, str]:
+        """Return storage paths for diagnostics."""
+        return {
+            "Speicherordner": str(self._storage_dir),
+            "Trainingsdaten_Datei": str(self._training_data_path),
+            "Heizkurven_Datei": str(self._heating_curve_path),
+            "ML_Modell_Datei_geplant": str(self._model_path),
+        }
+
+    async def _async_legacy_store_load(self) -> list[dict[str, Any]]:
+        """Load legacy HA Store samples for one-time migration from v0.7/v0.8.0."""
+        try:
+            from homeassistant.helpers.storage import Store
+
+            legacy_store = Store(self.hass, STORAGE_VERSION, f"{STORAGE_KEY_PREFIX}_{self.entry.entry_id}")
+            stored = await legacy_store.async_load()
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.debug("Could not load legacy training store: %s", err)
+            return []
+        if not isinstance(stored, dict):
+            return []
+        raw_samples = stored.get("samples", [])
+        if not isinstance(raw_samples, list):
+            return []
+        return [sample for sample in raw_samples if isinstance(sample, dict)]
+
     async def _async_load_training_samples(self) -> list[dict[str, Any]]:
-        """Load persisted daily training samples."""
+        """Load persisted daily training samples from /config/.storage/heatpump_consumption_forecast/."""
         if self._training_samples is not None:
             return self._training_samples
+
+        def _read_file() -> dict[str, Any] | None:
+            if not self._training_data_path.exists():
+                return None
+            with self._training_data_path.open("r", encoding="utf-8") as file_obj:
+                return json.load(file_obj)
+
+        stored = None
         try:
-            stored = await self._store.async_load()
+            stored = await self.hass.async_add_executor_job(_read_file)
         except Exception as err:  # noqa: BLE001
-            _LOGGER.debug("Could not load training store: %s", err)
-            stored = None
-        samples = []
+            _LOGGER.debug("Could not load training data file %s: %s", self._training_data_path, err)
+
+        samples: list[dict[str, Any]] = []
         if isinstance(stored, dict):
             raw_samples = stored.get("samples", [])
             if isinstance(raw_samples, list):
                 samples = [sample for sample in raw_samples if isinstance(sample, dict)]
+
+        # One-time migration path for users who installed v0.7.x/v0.8.0.
+        if not samples:
+            legacy_samples = await self._async_legacy_store_load()
+            if legacy_samples:
+                samples = legacy_samples
+                _LOGGER.info("Migrated %s training samples to %s", len(samples), self._training_data_path)
+
         self._training_samples = samples[-MAX_TRAINING_SAMPLES:]
+        if samples and stored is None:
+            await self._async_save_training_samples(self._training_samples)
         return self._training_samples
 
-    async def _async_store_training_sample(self, sample: dict[str, Any]) -> list[dict[str, Any]]:
+    async def _async_save_training_samples(self, samples: list[dict[str, Any]]) -> None:
+        """Save all training samples to JSON file without blocking the event loop."""
+        payload = {
+            "version": 1,
+            "domain": DOMAIN,
+            "entry_id": self.entry.entry_id,
+            "updated_at": dt_util.now().isoformat(),
+            "samples": samples[-MAX_TRAINING_SAMPLES:],
+        }
+
+        def _write_file() -> None:
+            os.makedirs(self._storage_dir, exist_ok=True)
+            tmp_path = self._training_data_path.with_suffix(".json.tmp")
+            with tmp_path.open("w", encoding="utf-8") as file_obj:
+                json.dump(payload, file_obj, ensure_ascii=False, indent=2, sort_keys=True)
+            os.replace(tmp_path, self._training_data_path)
+
+        await self.hass.async_add_executor_job(_write_file)
+
+    async def _async_store_heating_curve(self, heating_curve: dict[str, Any]) -> None:
+        """Persist latest heating-curve analysis for inspection/export."""
+        payload = {
+            "version": 1,
+            "domain": DOMAIN,
+            "entry_id": self.entry.entry_id,
+            "updated_at": dt_util.now().isoformat(),
+            "heating_curve": heating_curve,
+        }
+
+        def _write_file() -> None:
+            os.makedirs(self._storage_dir, exist_ok=True)
+            tmp_path = self._heating_curve_path.with_suffix(".json.tmp")
+            with tmp_path.open("w", encoding="utf-8") as file_obj:
+                json.dump(payload, file_obj, ensure_ascii=False, indent=2, sort_keys=True)
+            os.replace(tmp_path, self._heating_curve_path)
+
+        try:
+            await self.hass.async_add_executor_job(_write_file)
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.debug("Could not save heating curve file %s: %s", self._heating_curve_path, err)
+
+    def _finalize_previous_training_samples(
+        self,
+        samples: list[dict[str, Any]],
+        today_date: str,
+        total_series: dict[str, Any],
+        heating_series: dict[str, Any],
+        dhw_series: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        """Mark previous days as completed when final recorder values are available.
+
+        Current-day samples are intentionally incomplete because daily sensors
+        still count up until midnight. Completed samples are the only samples
+        later used for ML training and real forecast quality checks.
+        """
+        now_iso = dt_util.now().isoformat()
+        for sample in samples:
+            sample_date = sample.get("date")
+            if not sample_date or sample_date == today_date:
+                sample["completed"] = False
+                sample.setdefault("actual_total_kwh_final", None)
+                sample.setdefault("actual_heating_kwh_final", None)
+                sample.setdefault("actual_dhw_kwh_final", None)
+                sample.setdefault("forecast_error_kwh", None)
+                sample.setdefault("forecast_abs_error_kwh", None)
+                continue
+
+            final_total = (total_series or {}).get(sample_date)
+            if final_total is None:
+                sample["completed"] = False
+                sample.setdefault("completion_pending_reason", "Tagesendwert noch nicht im Recorder verfügbar")
+                continue
+
+            try:
+                final_total_f = float(final_total)
+            except (TypeError, ValueError):
+                sample["completed"] = False
+                sample.setdefault("completion_pending_reason", "Ungültiger Tagesendwert")
+                continue
+
+            final_heating = (heating_series or {}).get(sample_date)
+            final_dhw = (dhw_series or {}).get(sample_date)
+            try:
+                final_heating_f = float(final_heating) if final_heating is not None else None
+            except (TypeError, ValueError):
+                final_heating_f = None
+            try:
+                final_dhw_f = float(final_dhw) if final_dhw is not None else None
+            except (TypeError, ValueError):
+                final_dhw_f = None
+
+            if final_dhw_f is None and final_heating_f is not None:
+                final_dhw_f = max(final_total_f - final_heating_f, 0.0)
+            if final_heating_f is None and final_dhw_f is not None:
+                final_heating_f = max(final_total_f - final_dhw_f, 0.0)
+
+            forecast_today = sample.get("forecast_today_kwh")
+            try:
+                forecast_today_f = float(forecast_today) if forecast_today is not None else None
+            except (TypeError, ValueError):
+                forecast_today_f = None
+
+            sample["completed"] = True
+            sample["completed_at"] = now_iso
+            sample.pop("completion_pending_reason", None)
+            sample["actual_total_kwh_final"] = round(final_total_f, 3)
+            sample["actual_heating_kwh_final"] = round(final_heating_f, 3) if final_heating_f is not None else None
+            sample["actual_dhw_kwh_final"] = round(final_dhw_f, 3) if final_dhw_f is not None else None
+            if forecast_today_f is not None:
+                error = final_total_f - forecast_today_f
+                sample["forecast_error_kwh"] = round(error, 3)
+                sample["forecast_abs_error_kwh"] = round(abs(error), 3)
+            else:
+                sample["forecast_error_kwh"] = None
+                sample["forecast_abs_error_kwh"] = None
+        return samples
+
+    async def _async_store_training_sample(
+        self,
+        sample: dict[str, Any],
+        total_series: dict[str, Any] | None = None,
+        heating_series: dict[str, Any] | None = None,
+        dhw_series: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
         """Persist or update one daily learning sample.
 
-        v0.7 stores one record per date. The current day is overwritten during the
-        day and becomes a completed sample after midnight. This is intentionally
-        simple and prepares the data foundation for the later ML model.
+        v0.8.2 stores one record per date in
+        /config/.storage/heatpump_consumption_forecast/training_data.json.
+        The current day is overwritten during the day and becomes a completed
+        sample after midnight.
         """
         samples = await self._async_load_training_samples()
         date_key = sample.get("date")
         if not date_key:
             return samples
+        samples = self._finalize_previous_training_samples(
+            samples,
+            str(date_key),
+            total_series or {},
+            heating_series or {},
+            dhw_series or {},
+        )
         replaced = False
         for idx, existing in enumerate(samples):
             if existing.get("date") == date_key:
@@ -388,9 +572,9 @@ class HeatPumpForecastCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         samples = samples[-MAX_TRAINING_SAMPLES:]
         self._training_samples = samples
         try:
-            await self._store.async_save({"samples": samples})
+            await self._async_save_training_samples(samples)
         except Exception as err:  # noqa: BLE001
-            _LOGGER.debug("Could not save training sample: %s", err)
+            _LOGGER.debug("Could not save training sample file %s: %s", self._training_data_path, err)
         return samples
 
     async def _async_get_forecast_temperatures(self, weather_entity: str | None) -> dict[int, float | None]:
@@ -685,6 +869,7 @@ class HeatPumpForecastCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         dhw_history = await self._async_get_daily_history_stats(dhw_entity)
         temp_history = await self._async_get_temperature_history_stats(config.get(CONF_OUTDOOR_TEMP_SENSOR))
         heating_curve = _learn_heating_curve(temp_history.get("series") or {}, heating_history.get("series") or {}, heating_threshold)
+        await self._async_store_heating_curve(heating_curve)
 
         today_avg_temp = temp_history.get("today_avg") if temp_history.get("today_avg") is not None else current_temp
         tomorrow_avg_temp = tomorrow_temp if tomorrow_temp is not None else today_avg_temp
@@ -812,7 +997,7 @@ class HeatPumpForecastCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             confidence += 5
 
         reason_structured = {
-            "version": "Basis v0.8.0",
+            "version": "Basis v0.8.2",
             "source": source,
             "split_source": split_source,
             "today_so_far_kwh": round(today_so_far_kwh, 2) if today_so_far_kwh is not None else None,
@@ -836,7 +1021,7 @@ class HeatPumpForecastCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         source_label = _label_source(source)
         split_label = _label_split_source(split_source)
         reason_text = (
-            f"v0.8.0 | Datenbasis: {source_label} | "
+            f"v0.8.2 | Datenbasis: {source_label} | "
             f"Basis {baseline_kwh:.2f} kWh, Ø7 {history_stats.get('avg_7')} kWh | "
             f"Temperatur Ø heute {today_avg_temp}°C, Heizgrenze {heating_threshold:.1f}°C | "
             f"Warmwasser {float(dhw_baseline or 0):.2f} kWh + Heizung {float(heating_baseline or 0):.2f} kWh "
@@ -868,6 +1053,12 @@ class HeatPumpForecastCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "actual_total_kwh_so_far": round(today_so_far_kwh, 3) if today_so_far_kwh is not None else None,
             "actual_heating_kwh_so_far": round(today_heating_so_far_kwh, 3) if today_heating_so_far_kwh is not None else None,
             "actual_dhw_kwh_so_far": round(today_dhw_so_far_kwh, 3) if today_dhw_so_far_kwh is not None else None,
+            "completed": False,
+            "actual_total_kwh_final": None,
+            "actual_heating_kwh_final": None,
+            "actual_dhw_kwh_final": None,
+            "forecast_error_kwh": None,
+            "forecast_abs_error_kwh": None,
             "estimated_dhw_basis_kwh": round(float(dhw_baseline or 0), 3),
             "estimated_heating_basis_kwh": round(float(heating_baseline or 0), 3),
             "avg_temperature_c": today_avg_temp,
@@ -887,17 +1078,26 @@ class HeatPumpForecastCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "source": source,
             "split_source": split_source,
         }
-        training_samples = await self._async_store_training_sample(training_sample)
-        completed_training_samples = [s for s in training_samples if s.get("date") != today_date]
+        training_samples = await self._async_store_training_sample(
+            training_sample,
+            total_series=(history_stats.get("series") or {}),
+            heating_series=(heating_history.get("series") or {}),
+            dhw_series=(dhw_history.get("series") or {}),
+        )
+        completed_training_samples = [s for s in training_samples if s.get("completed")]
+        pending_training_samples = [s for s in training_samples if not s.get("completed")]
 
         reason_structured["training"] = {
             "enabled": True,
+            **self._storage_paths_attributes(),
             "sample_count": len(training_samples),
             "ml_daily_sample_count": len(training_samples),
             "completed_sample_count": len(completed_training_samples),
             "ml_completed_daily_sample_count": len(completed_training_samples),
+            "pending_sample_count": len(pending_training_samples),
             "latest_sample": training_sample,
             "last_7_samples": training_samples[-7:],
+            "completed_last_7_samples": completed_training_samples[-7:],
         }
 
         completed_count_for_quality = len(completed_training_samples)
@@ -933,8 +1133,22 @@ class HeatPumpForecastCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "reason_structured": reason_structured,
             "training_sample_count": len(training_samples),
             "training_completed_sample_count": len(completed_training_samples),
+            "training_pending_sample_count": len(pending_training_samples),
             "training_latest_sample": training_sample,
             "training_last_7_samples": training_samples[-7:],
+            "training_completed_last_7_samples": completed_training_samples[-7:],
+            "storage_paths": self._storage_paths_attributes(),
+            "storage_status": {
+                "Speicherstatus": "OK",
+                "Trainingsdaten_Datei_vorhanden": self._training_data_path.exists(),
+                "Heizkurven_Datei_vorhanden": self._heating_curve_path.exists(),
+                "Trainingsdaten_Datei": str(self._training_data_path),
+                "Heizkurven_Datei": str(self._heating_curve_path),
+                "ML_Modell_Datei_geplant": str(self._model_path),
+                "Gesammelte_Tagesdaten_ML": len(training_samples),
+                "Abgeschlossene_Tagesdaten_ML": len(completed_training_samples),
+                "Offene_Tagesdaten_ML": len(pending_training_samples),
+            },
             "heating_curve": heating_curve,
         }
 
@@ -955,6 +1169,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
             HeatPumpLastTrainingSampleSensor(coordinator, entry),
             HeatPumpTrainingStatusSensor(coordinator, entry),
             HeatPumpDataQualitySensor(coordinator, entry),
+            HeatPumpStorageStatusSensor(coordinator, entry),
             HeatPumpHeatingCurveStatusSensor(coordinator, entry),
             HeatPumpHeatingCurveSensor(coordinator, entry),
         ]
@@ -1145,8 +1360,11 @@ class HeatPumpTrainingSamplesSensor(HeatPumpBaseSensor):
         return {
             "Gesammelte_Tagesdaten_ML": self.coordinator.data.get("training_sample_count"),
             "Abgeschlossene_Tagesdaten_ML": self.coordinator.data.get("training_completed_sample_count"),
+            "Offene_Tagesdaten_ML": self.coordinator.data.get("training_pending_sample_count"),
             "Aktueller_Datensatz_ML": self.coordinator.data.get("training_latest_sample"),
             "Letzte_7_Datensätze_ML": self.coordinator.data.get("training_last_7_samples"),
+            "Letzte_7_abgeschlossene_Datensätze_ML": self.coordinator.data.get("training_completed_last_7_samples"),
+            **(self.coordinator.data.get("storage_paths") or {}),
             "Hinweis": "Sammelt neue Tagesdaten für das spätere ML-Modell. Das ist getrennt von den historischen Tagen, die aus dem Home-Assistant-Recorder für die Heizkurve gelesen werden.",
         }
 
@@ -1185,9 +1403,16 @@ class HeatPumpLastTrainingSampleSensor(HeatPumpBaseSensor):
         return {
             "Datum": sample.get("date"),
             "Aktualisiert": sample.get("updated_at"),
+            "Abgeschlossen": sample.get("completed"),
+            "Abgeschlossen_am": sample.get("completed_at"),
             "Gesamtverbrauch_bisher_kWh": sample.get("actual_total_kwh_so_far"),
             "Heizverbrauch_bisher_kWh": sample.get("actual_heating_kwh_so_far"),
             "Warmwasser_bisher_kWh": sample.get("actual_dhw_kwh_so_far"),
+            "Gesamtverbrauch_final_kWh": sample.get("actual_total_kwh_final"),
+            "Heizverbrauch_final_kWh": sample.get("actual_heating_kwh_final"),
+            "Warmwasser_final_kWh": sample.get("actual_dhw_kwh_final"),
+            "Prognosefehler_kWh_intern": sample.get("forecast_error_kwh"),
+            "Prognosefehler_abs_kWh_intern": sample.get("forecast_abs_error_kwh"),
             "Warmwasser_Basis_kWh": sample.get("estimated_dhw_basis_kwh"),
             "Heizung_Basis_kWh": sample.get("estimated_heating_basis_kwh"),
             "Temperatur_Durchschnitt_Grad_C": sample.get("avg_temperature_c"),
@@ -1249,6 +1474,7 @@ class HeatPumpTrainingStatusSensor(HeatPumpBaseSensor):
             "Fortschritt_Prozent": min(100, round((visible_count / minimum) * 100)) if minimum else 0,
             "ML_bereit": completed >= minimum,
             "ML_aktiv": False,
+            **(self.coordinator.data.get("storage_paths") or {}),
             "Hinweis": "Die Integration sammelt Tagesdaten. ML wird erst aktiviert, wenn genügend abgeschlossene Tagesdatensätze vorhanden sind.",
         }
 
@@ -1322,6 +1548,34 @@ class HeatPumpDataQualitySensor(HeatPumpBaseSensor):
             "Fehlende_Verbrauchsdaten": not flags["consumption"],
             "Fehlende_Belegungsdaten": not flags["occupancy"],
             "Hinweis": "Diese Bewertung prüft die Datenbasis. Sie ist noch keine ML-Genauigkeitsbewertung.",
+        }
+
+
+class HeatPumpStorageStatusSensor(HeatPumpBaseSensor):
+    """Diagnostic sensor for persistent storage."""
+
+    _attr_icon = "mdi:content-save-check-outline"
+    _attr_name = "Speicherstatus"
+    _attr_translation_key = "storage_status"
+
+    def __init__(self, coordinator: HeatPumpForecastCoordinator, entry: ConfigEntry) -> None:
+        """Initialize sensor."""
+        super().__init__(coordinator, entry)
+        self._attr_unique_id = f"{entry.entry_id}_storage_status"
+
+    @property
+    def native_value(self) -> str | None:
+        """Return storage status."""
+        status = self.coordinator.data.get("storage_status") or {}
+        return status.get("Speicherstatus") or "Unbekannt"
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return storage details."""
+        status = self.coordinator.data.get("storage_status") or {}
+        return {
+            **status,
+            "Hinweis": "Trainingsdaten und Heizkurve werden dauerhaft unter /config/.storage/heatpump_consumption_forecast gespeichert.",
         }
 
 
