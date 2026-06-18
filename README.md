@@ -91,7 +91,24 @@ Optional:
 
 ## Entwicklungsstand
 
-Die Integration befindet sich in aktiver Entwicklung. Ziel ist eine robuste lokale Verbrauchsprognose und später ein kleines lokales ML-Modell, das auf den gesammelten Tagesdaten trainiert wird.
+## mit v0.8.2
+
+- Trainingsdaten werden jetzt dauerhaft als JSON gespeichert.
+- Speicherort: `/config/.storage/heatpump_consumption_forecast/training_data.json`
+- Heizkurvenanalyse wird zusätzlich gespeichert unter: `/config/.storage/heatpump_consumption_forecast/heating_curve.json`
+- Geplanter Speicherort für spätere ML-Modelle: `/config/.storage/heatpump_consumption_forecast/model.pkl`
+- Migration vorhandener v0.7.x/v0.8.0-Trainingsdaten aus dem bisherigen Home-Assistant-Store vorbereitet.
+- Diagnoseattribute zeigen die Speicherpfade an.
+
+Hinweis: v0.8.2 enthält noch kein aktives ML-Modell. Die Integration sammelt weiterhin Trainingsdaten und bereitet die ML-Auswertung vor.
+
+## v0.8.2
+
+- Completed daily training samples are now marked with `completed: true` once final daily recorder values are available.
+- Final daily values are stored separately from live `*_so_far` values.
+- Internal forecast error values are stored for future quality evaluation, but are not displayed as user-facing percentage values.
+- Added diagnostic sensor `Speicherstatus` for persistent JSON storage under `/config/.storage/heatpump_consumption_forecast/`.
+
 
 ## Lizenz
 
