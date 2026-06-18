@@ -217,6 +217,15 @@
       },
       "data_quality": {
         "name": "Datenqualität"
+      },
+      "storage_status": {
+        "name": "Speicherstatus"
+      },
+      "heating_curve_status": {
+        "name": "Heizkurvenstatus"
+      },
+      "heating_curve": {
+        "name": "Erlernte Heizkurve"
       }
     }
   }
