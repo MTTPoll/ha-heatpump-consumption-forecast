@@ -23,7 +23,24 @@ from .const import (
     CONF_HEATPUMP_DAILY_ENERGY_SENSOR,
     CONF_HEATING_DAILY_ENERGY_SENSOR,
     CONF_DHW_DAILY_ENERGY_SENSOR,
+    CONF_DHW_DAILY_ENERGY_MODE,
+    DHW_DAILY_ENERGY_MODE_NONE,
+    CONF_DHW_TARGET_TEMP,
+    CONF_DHW_TANK_VOLUME_L,
+    CONF_DHW_LITERS_PER_PERSON,
     CONF_HEATING_THRESHOLD_TEMP,
+    CONF_HEATING_CURVE_FLOW_WARM,
+    CONF_HEATING_CURVE_FLOW_MID,
+    CONF_HEATING_CURVE_FLOW_COLD,
+    CONF_HEATING_CURVE_SAVING_PERCENT_PER_C,
+    CONF_HEATING_CURVE_SIMULATION_ENABLED,
+    DEFAULT_HEATING_CURVE_FLOW_WARM,
+    DEFAULT_HEATING_CURVE_FLOW_MID,
+    DEFAULT_HEATING_CURVE_FLOW_COLD,
+    DEFAULT_HEATING_CURVE_SAVING_PERCENT_PER_C,
+    DEFAULT_DHW_TARGET_TEMP,
+    DEFAULT_DHW_TANK_VOLUME_L,
+    DEFAULT_DHW_LITERS_PER_PERSON,
     CONF_HEATPUMP_TOTAL_ENERGY_SENSOR,
     CONF_OUTDOOR_TEMP_SENSOR,
     CONF_PERSON_MODEL,
@@ -60,6 +77,7 @@ def _find_candidates(
 def _guess_default(candidates: list[str]) -> str | None:
     """Return first candidate or None."""
     return candidates[0] if candidates else None
+
 
 
 class HeatPumpConsumptionForecastConfigFlow(
@@ -246,6 +264,10 @@ class HeatPumpConsumptionForecastConfigFlow(
         """Third step: select sensors."""
         if user_input is not None:
             self._data.update(user_input)
+            # Kein separater Warmwasser-Energiezähler im UI:
+            # Warmwasser wird immer aus Gesamtverbrauch minus Heizverbrauch berechnet.
+            self._data[CONF_DHW_DAILY_ENERGY_MODE] = DHW_DAILY_ENERGY_MODE_NONE
+            self._data[CONF_DHW_DAILY_ENERGY_SENSOR] = None
             return self.async_create_entry(
                 title=self._data.get(CONF_NAME, DEFAULT_NAME),
                 data=self._data,
@@ -308,17 +330,6 @@ class HeatPumpConsumptionForecastConfigFlow(
             "sensor",
         )
 
-        dhw_candidates = _find_candidates(
-            self.hass,
-            (
-                "warmwasser",
-                "ww",
-                "dhw",
-                "domestic hot water",
-                "brauchwasser",
-            ),
-            "sensor",
-        )
 
         schema = vol.Schema(
             {
@@ -359,14 +370,84 @@ class HeatPumpConsumptionForecastConfigFlow(
                     )
                 ),
                 vol.Optional(
-                    CONF_HEATING_DAILY_ENERGY_SENSOR,
-                    default=_guess_default(heating_candidates),
-                ): selector.EntitySelector(
-                    selector.EntitySelectorConfig(domain=["sensor"])
+                    CONF_HEATING_CURVE_SIMULATION_ENABLED,
+                    default=True,
+                ): selector.BooleanSelector(),
+                vol.Optional(
+                    CONF_HEATING_CURVE_FLOW_WARM,
+                    default=DEFAULT_HEATING_CURVE_FLOW_WARM,
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=10,
+                        max=70,
+                        step=0.1,
+                        unit_of_measurement="°C",
+                        mode=selector.NumberSelectorMode.BOX,
+                    )
                 ),
                 vol.Optional(
-                    CONF_DHW_DAILY_ENERGY_SENSOR,
-                    default=_guess_default(dhw_candidates),
+                    CONF_HEATING_CURVE_FLOW_MID,
+                    default=DEFAULT_HEATING_CURVE_FLOW_MID,
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=10,
+                        max=80,
+                        step=0.1,
+                        unit_of_measurement="°C",
+                        mode=selector.NumberSelectorMode.BOX,
+                    )
+                ),
+                vol.Optional(
+                    CONF_HEATING_CURVE_FLOW_COLD,
+                    default=DEFAULT_HEATING_CURVE_FLOW_COLD,
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=10,
+                        max=90,
+                        step=0.1,
+                        unit_of_measurement="°C",
+                        mode=selector.NumberSelectorMode.BOX,
+                    )
+                ),
+                vol.Optional(
+                    CONF_HEATING_CURVE_SAVING_PERCENT_PER_C,
+                    default=DEFAULT_HEATING_CURVE_SAVING_PERCENT_PER_C,
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0,
+                        max=10,
+                        step=0.05,
+                        unit_of_measurement="%/°C",
+                        mode=selector.NumberSelectorMode.BOX,
+                    )
+                ),
+                vol.Optional(
+                    CONF_DHW_TARGET_TEMP,
+                    default=DEFAULT_DHW_TARGET_TEMP,
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=25,
+                        max=75,
+                        step=0.1,
+                        unit_of_measurement="°C",
+                        mode=selector.NumberSelectorMode.BOX,
+                    )
+                ),
+                vol.Optional(
+                    CONF_DHW_TANK_VOLUME_L,
+                    default=DEFAULT_DHW_TANK_VOLUME_L,
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0,
+                        max=2000,
+                        step=10,
+                        unit_of_measurement="L",
+                        mode=selector.NumberSelectorMode.BOX,
+                    )
+                ),
+                vol.Optional(
+                    CONF_HEATING_DAILY_ENERGY_SENSOR,
+                    default=_guess_default(heating_candidates),
                 ): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain=["sensor"])
                 ),
@@ -398,7 +479,12 @@ class HeatPumpConsumptionForecastOptionsFlow(config_entries.OptionsFlow):
         }
 
         if user_input is not None:
-            return self.async_create_entry(title="", data=user_input)
+            self._options_data = dict(user_input)
+            # Kein separater Warmwasser-Energiezähler im UI:
+            # Warmwasser wird immer aus Gesamtverbrauch minus Heizverbrauch berechnet.
+            self._options_data[CONF_DHW_DAILY_ENERGY_MODE] = DHW_DAILY_ENERGY_MODE_NONE
+            self._options_data[CONF_DHW_DAILY_ENERGY_SENSOR] = None
+            return self.async_create_entry(title="", data=self._options_data)
 
         schema = vol.Schema(
             {
@@ -439,14 +525,84 @@ class HeatPumpConsumptionForecastOptionsFlow(config_entries.OptionsFlow):
                     )
                 ),
                 vol.Optional(
-                    CONF_HEATING_DAILY_ENERGY_SENSOR,
-                    default=current.get(CONF_HEATING_DAILY_ENERGY_SENSOR),
-                ): selector.EntitySelector(
-                    selector.EntitySelectorConfig(domain=["sensor"])
+                    CONF_HEATING_CURVE_SIMULATION_ENABLED,
+                    default=current.get(CONF_HEATING_CURVE_SIMULATION_ENABLED, True),
+                ): selector.BooleanSelector(),
+                vol.Optional(
+                    CONF_HEATING_CURVE_FLOW_WARM,
+                    default=current.get(CONF_HEATING_CURVE_FLOW_WARM, DEFAULT_HEATING_CURVE_FLOW_WARM),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=10,
+                        max=70,
+                        step=0.1,
+                        unit_of_measurement="°C",
+                        mode=selector.NumberSelectorMode.BOX,
+                    )
                 ),
                 vol.Optional(
-                    CONF_DHW_DAILY_ENERGY_SENSOR,
-                    default=current.get(CONF_DHW_DAILY_ENERGY_SENSOR),
+                    CONF_HEATING_CURVE_FLOW_MID,
+                    default=current.get(CONF_HEATING_CURVE_FLOW_MID, DEFAULT_HEATING_CURVE_FLOW_MID),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=10,
+                        max=80,
+                        step=0.1,
+                        unit_of_measurement="°C",
+                        mode=selector.NumberSelectorMode.BOX,
+                    )
+                ),
+                vol.Optional(
+                    CONF_HEATING_CURVE_FLOW_COLD,
+                    default=current.get(CONF_HEATING_CURVE_FLOW_COLD, DEFAULT_HEATING_CURVE_FLOW_COLD),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=10,
+                        max=90,
+                        step=0.1,
+                        unit_of_measurement="°C",
+                        mode=selector.NumberSelectorMode.BOX,
+                    )
+                ),
+                vol.Optional(
+                    CONF_HEATING_CURVE_SAVING_PERCENT_PER_C,
+                    default=current.get(CONF_HEATING_CURVE_SAVING_PERCENT_PER_C, DEFAULT_HEATING_CURVE_SAVING_PERCENT_PER_C),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0,
+                        max=10,
+                        step=0.05,
+                        unit_of_measurement="%/°C",
+                        mode=selector.NumberSelectorMode.BOX,
+                    )
+                ),
+                vol.Optional(
+                    CONF_DHW_TARGET_TEMP,
+                    default=current.get(CONF_DHW_TARGET_TEMP, DEFAULT_DHW_TARGET_TEMP),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=25,
+                        max=75,
+                        step=0.1,
+                        unit_of_measurement="°C",
+                        mode=selector.NumberSelectorMode.BOX,
+                    )
+                ),
+                vol.Optional(
+                    CONF_DHW_TANK_VOLUME_L,
+                    default=current.get(CONF_DHW_TANK_VOLUME_L, DEFAULT_DHW_TANK_VOLUME_L),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0,
+                        max=2000,
+                        step=10,
+                        unit_of_measurement="L",
+                        mode=selector.NumberSelectorMode.BOX,
+                    )
+                ),
+                vol.Optional(
+                    CONF_HEATING_DAILY_ENERGY_SENSOR,
+                    default=current.get(CONF_HEATING_DAILY_ENERGY_SENSOR),
                 ): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain=["sensor"])
                 ),

@@ -21,10 +21,31 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.util import dt as dt_util
 
 from .const import (
-    CONF_DHW_DAILY_ENERGY_SENSOR,
+    DHW_DAILY_ENERGY_MODE_NONE,
     CONF_FIXED_PERSONS,
     CONF_HEATING_DAILY_ENERGY_SENSOR,
     CONF_HEATING_THRESHOLD_TEMP,
+    CONF_HEATING_CURVE_FLOW_WARM,
+    CONF_HEATING_CURVE_FLOW_MID,
+    CONF_HEATING_CURVE_FLOW_COLD,
+    CONF_HEATING_CURVE_SAVING_PERCENT_PER_C,
+    CONF_HEATING_CURVE_SIMULATION_ENABLED,
+    CONF_DHW_TARGET_TEMP,
+    CONF_DHW_TANK_VOLUME_L,
+    CONF_DHW_LITERS_PER_PERSON,
+    DEFAULT_DHW_TARGET_TEMP,
+    DEFAULT_DHW_TANK_VOLUME_L,
+    DEFAULT_DHW_LITERS_PER_PERSON,
+    DEFAULT_COLD_WATER_TEMP,
+    RUNTIME_HEATING_CURVE_DELTA_C,
+    RUNTIME_DHW_TARGET_DELTA_C,
+    DEFAULT_HEATING_CURVE_FLOW_WARM,
+    DEFAULT_HEATING_CURVE_FLOW_MID,
+    DEFAULT_HEATING_CURVE_FLOW_COLD,
+    DEFAULT_HEATING_CURVE_SAVING_PERCENT_PER_C,
+    HEATING_CURVE_OUTDOOR_WARM,
+    HEATING_CURVE_OUTDOOR_MID,
+    HEATING_CURVE_OUTDOOR_COLD,
     CONF_HEATPUMP_DAILY_ENERGY_SENSOR,
     CONF_HEATPUMP_TOTAL_ENERGY_SENSOR,
     CONF_OUTDOOR_TEMP_SENSOR,
@@ -198,6 +219,10 @@ def _label_split_source(source: str | None) -> str:
         "total_minus_heating": "Gesamtverbrauch minus Heizverbrauch",
         "dedicated_sensors": "separate Verbrauchssensoren",
         "total_minus_dhw": "Gesamtverbrauch minus Warmwasserverbrauch",
+        "no_dhw_meter_total_minus_heating": "Kein Warmwasserzähler: Gesamt minus Heizung",
+        "no_dhw_meter_total_as_dhw": "Kein Warmwasserzähler: Gesamtverbrauch als Warmwasser",
+        "summer_total_as_dhw": "Sommerbetrieb: Gesamtverbrauch als Warmwasser",
+        "estimated_no_dhw_meter_total_minus_heating": "Kein Warmwasserzähler: Heizung geschätzt, Warmwasser abgeleitet",
         "estimated_split": "geschätzte Aufteilung",
         "dhw_guardrail_total_minus_heating": "Warmwasser abgeleitet: Gesamt minus Heizung",
         "heating_guardrail_total_minus_dhw": "Heizung abgeleitet: Gesamt minus Warmwasser",
@@ -271,6 +296,254 @@ def _plausible_forecast(value: float | None, rule_value: float | None) -> bool:
 
 
 
+
+
+def _interpolate_flow_temperature(
+    outdoor_temp_c: float | None,
+    flow_cold: float,
+    flow_mid: float,
+    flow_warm: float,
+) -> float | None:
+    """Calculate target flow temperature from three heating-curve support points."""
+    temp = _to_float(outdoor_temp_c)
+    if temp is None:
+        return None
+
+    x_cold = float(HEATING_CURVE_OUTDOOR_COLD)
+    x_mid = float(HEATING_CURVE_OUTDOOR_MID)
+    x_warm = float(HEATING_CURVE_OUTDOOR_WARM)
+
+    def _lin(x_value: float, x_a: float, y_a: float, x_b: float, y_b: float) -> float:
+        return y_a + (x_value - x_a) * (y_b - y_a) / (x_b - x_a)
+
+    if temp >= x_warm:
+        flow = flow_warm
+    elif temp > x_mid:
+        flow = _lin(temp, x_mid, flow_mid, x_warm, flow_warm)
+    elif temp > x_cold:
+        flow = _lin(temp, x_cold, flow_cold, x_mid, flow_mid)
+    else:
+        flow = flow_cold
+    return round(float(flow), 2)
+
+
+def _build_heating_curve_simulation(
+    *,
+    enabled: bool,
+    avg_temp_today: float | None,
+    avg_temp_tomorrow: float | None,
+    avg_temp_day_after: float | None,
+    heating_threshold: float,
+    flow_cold: float,
+    flow_mid: float,
+    flow_warm: float,
+    saving_percent_per_c: float,
+    heating_curve_delta_c: float,
+    dhw_target_delta_c: float,
+    dhw_target_temp_c: float,
+    dhw_tank_volume_l: float,
+    dhw_liters_per_person: float,
+    today_rule: dict[str, Any],
+    tomorrow_rule: dict[str, Any],
+    day_after_rule: dict[str, Any],
+    today_persons: float,
+    tomorrow_persons: float,
+    day_after_persons: float,
+) -> dict[str, Any]:
+    """Build interactive heating and DHW energy simulation.
+
+    Heating-curve changes are applied only to the heating share and only below
+    the heating threshold. DHW target-temperature changes are applied only to
+    the DHW share. The DHW calculation is based on learned daily DHW energy,
+    configured tank volume and target temperature, so occupancy and learned
+    draw-off behavior remain part of the forecast.
+    """
+    flow_cold = float(flow_cold)
+    flow_mid = float(flow_mid)
+    flow_warm = float(flow_warm)
+    saving_percent_per_c = max(0.0, min(10.0, float(saving_percent_per_c or 0.0)))
+    heating_curve_delta_c = max(-5.0, min(5.0, float(heating_curve_delta_c or 0.0)))
+    dhw_target_delta_c = max(-10.0, min(10.0, float(dhw_target_delta_c or 0.0)))
+    dhw_target_temp_c = max(25.0, min(75.0, float(dhw_target_temp_c or DEFAULT_DHW_TARGET_TEMP)))
+    dhw_tank_volume_l = max(0.0, min(2000.0, float(dhw_tank_volume_l or 0.0)))
+    dhw_liters_per_person = max(0.0, min(250.0, float(dhw_liters_per_person or DEFAULT_DHW_LITERS_PER_PERSON)))
+    cold_water_temp_c = float(DEFAULT_COLD_WATER_TEMP)
+
+    def _dhw_change_for_day(dhw_kwh: float, persons: float) -> dict[str, Any]:
+        persons = max(0.0, float(persons or 0.0))
+        daily_liters = persons * dhw_liters_per_person
+        demand_based_cycles = (daily_liters / dhw_tank_volume_l) if dhw_tank_volume_l > 0 else None
+        if dhw_kwh <= 0 or dhw_target_delta_c == 0:
+            return {
+                "saving_kwh_day": 0.0,
+                "additional_kwh_day": 0.0,
+                "change_kwh_day": 0.0,
+                "estimated_tank_cycles_per_day": 0.0,
+                "estimated_tank_cycles_per_day_by_persons": round(demand_based_cycles, 2) if demand_based_cycles is not None else None,
+                "persons": round(persons, 2),
+                "liters_per_person": dhw_liters_per_person,
+                "daily_liters": round(daily_liters, 1),
+                "tank_volume_l": dhw_tank_volume_l,
+                "energy_per_full_tank_charge_kwh": 0.0,
+                "energy_change_per_full_tank_kwh": 0.0,
+            }
+        effective_delta = max(1.0, dhw_target_temp_c - cold_water_temp_c)
+        new_effective_delta = max(1.0, dhw_target_temp_c + dhw_target_delta_c - cold_water_temp_c)
+        new_dhw_kwh = dhw_kwh * (new_effective_delta / effective_delta)
+        change_kwh = new_dhw_kwh - dhw_kwh
+        energy_per_full_tank = dhw_tank_volume_l * 0.001163 * effective_delta if dhw_tank_volume_l > 0 else None
+        energy_change_per_tank = dhw_tank_volume_l * 0.001163 * abs(dhw_target_delta_c) if dhw_tank_volume_l > 0 else None
+        estimated_cycles = (dhw_kwh / energy_per_full_tank) if energy_per_full_tank and energy_per_full_tank > 0 else None
+        relative_change_percent = (dhw_target_delta_c / effective_delta * 100.0) if effective_delta > 0 else 0.0
+        return {
+            "saving_kwh_day": round(max(-change_kwh, 0.0), 3),
+            "additional_kwh_day": round(max(change_kwh, 0.0), 3),
+            "change_kwh_day": round(change_kwh, 3),
+            "estimated_tank_cycles_per_day": round(estimated_cycles, 2) if estimated_cycles is not None else None,
+            "estimated_tank_cycles_per_day_by_persons": round(demand_based_cycles, 2) if demand_based_cycles is not None else None,
+            "persons": round(persons, 2),
+            "liters_per_person": dhw_liters_per_person,
+            "daily_liters": round(daily_liters, 1),
+            "tank_volume_l": dhw_tank_volume_l,
+            "learned_dhw_kwh_day": round(dhw_kwh, 3),
+            "target_temp_c": dhw_target_temp_c,
+            "target_delta_c": round(dhw_target_delta_c, 2),
+            "cold_water_reference_c": cold_water_temp_c,
+            "temperature_hub_c": round(effective_delta, 2),
+            "relative_temp_change_percent": round(relative_change_percent, 2),
+            "energy_per_full_tank_charge_kwh": round(energy_per_full_tank, 3) if energy_per_full_tank is not None else None,
+            "energy_change_per_full_tank_kwh": round(energy_change_per_tank, 3) if energy_change_per_tank is not None else None,
+        }
+
+    def _scenario_for_day(label: str, avg_temp: float | None, rule: dict[str, Any], persons: float) -> dict[str, Any]:
+        base_flow = _interpolate_flow_temperature(avg_temp, flow_cold, flow_mid, flow_warm)
+        total_kwh = float(rule.get("total_kwh") or 0.0)
+        heating_kwh = float(rule.get("heating_kwh") or 0.0)
+        dhw_kwh = float(rule.get("dhw_kwh") or 0.0)
+        heating_active = bool(rule.get("heating_active")) and avg_temp is not None and float(avg_temp) < float(heating_threshold)
+
+        # A negative heating delta lowers the flow temperature and saves energy.
+        # A positive heating delta raises the curve and adds consumption.
+        if heating_active and heating_kwh > 0 and heating_curve_delta_c != 0:
+            heating_change_kwh = heating_kwh * (saving_percent_per_c / 100.0) * heating_curve_delta_c
+        else:
+            heating_change_kwh = 0.0
+        dhw_change = _dhw_change_for_day(dhw_kwh, persons)
+        total_change_kwh = heating_change_kwh + float(dhw_change.get("change_kwh_day") or 0.0)
+        new_forecast = max(0.0, total_kwh + total_change_kwh)
+        net_saving = max(-total_change_kwh, 0.0)
+        net_additional = max(total_change_kwh, 0.0)
+
+        simulations: dict[str, Any] = {}
+        for delta_c in (-3, -2, -1, 1, 2, 3):
+            if heating_active and heating_kwh > 0:
+                change_kwh = heating_kwh * (saving_percent_per_c / 100.0) * delta_c
+            else:
+                change_kwh = 0.0
+            simulations[f"{'minus' if delta_c < 0 else 'plus'}_{abs(delta_c)}c"] = {
+                "flow_target_c": round(base_flow + delta_c, 2) if base_flow is not None else None,
+                "delta_flow_c": delta_c,
+                "saving_kwh_day": round(max(-change_kwh, 0.0), 3),
+                "additional_kwh_day": round(max(change_kwh, 0.0), 3),
+                "change_kwh_day": round(change_kwh, 3),
+                "saving_percent_heating": round(saving_percent_per_c * abs(delta_c), 2) if heating_active else 0.0,
+                "new_forecast_kwh": round(max(0.0, total_kwh + change_kwh), 3),
+            }
+
+        return {
+            "label": label,
+            "avg_temperature_c": avg_temp,
+            "heating_threshold_c": heating_threshold,
+            "summer_mode": not heating_active,
+            "current_flow_target_c": base_flow,
+            "heating_share_kwh": round(heating_kwh, 3),
+            "dhw_share_kwh": round(dhw_kwh, 3),
+            "base_forecast_kwh": round(total_kwh, 3),
+            "selected_simulation": {
+                "heating_curve_delta_c": round(heating_curve_delta_c, 2),
+                "dhw_target_delta_c": round(dhw_target_delta_c, 2),
+                "simulated_flow_target_c": round(base_flow + heating_curve_delta_c, 2) if base_flow is not None else None,
+                "simulated_dhw_target_temp_c": round(dhw_target_temp_c + dhw_target_delta_c, 2),
+                "heating_change_kwh_day": round(heating_change_kwh, 3),
+                "heating_saving_kwh_day": round(max(-heating_change_kwh, 0.0), 3),
+                "heating_additional_kwh_day": round(max(heating_change_kwh, 0.0), 3),
+                "dhw_change_kwh_day": dhw_change.get("change_kwh_day"),
+                "dhw_saving_kwh_day": dhw_change.get("saving_kwh_day"),
+                "dhw_additional_kwh_day": dhw_change.get("additional_kwh_day"),
+                "total_change_kwh_day": round(total_change_kwh, 3),
+                "total_saving_kwh_day": round(net_saving, 3),
+                "total_additional_kwh_day": round(net_additional, 3),
+                "new_forecast_kwh": round(new_forecast, 3),
+                "change_percent_total": round((total_change_kwh / total_kwh * 100.0), 2) if total_kwh > 0 else 0.0,
+                "dhw_details": dhw_change,
+                "dhw_demand": {
+                    "persons": dhw_change.get("persons"),
+                    "liters_per_person": dhw_change.get("liters_per_person"),
+                    "daily_liters": dhw_change.get("daily_liters"),
+                    "tank_volume_l": dhw_change.get("tank_volume_l"),
+                    "estimated_tank_cycles_per_day_by_persons": dhw_change.get("estimated_tank_cycles_per_day_by_persons"),
+                    "learned_dhw_kwh_day": dhw_change.get("learned_dhw_kwh_day"),
+                    "target_temp_c": dhw_change.get("target_temp_c"),
+                    "cold_water_reference_c": dhw_change.get("cold_water_reference_c"),
+                    "temperature_hub_c": dhw_change.get("temperature_hub_c"),
+                    "relative_temp_change_percent": dhw_change.get("relative_temp_change_percent"),
+                    "simulated_dhw_change_kwh": dhw_change.get("change_kwh_day"),
+                },
+            },
+            "simulation": simulations,
+            "note": "Heizkurven-Effekt ist 0 kWh, weil die Heizgrenze erreicht oder überschritten ist." if not heating_active else "Heizkurve wirkt nur auf Heizanteil; Warmwasser wird separat simuliert.",
+        }
+
+    today = _scenario_for_day("today", avg_temp_today, today_rule, today_persons)
+    tomorrow = _scenario_for_day("tomorrow", avg_temp_tomorrow, tomorrow_rule, tomorrow_persons)
+    day_after = _scenario_for_day("day_after_tomorrow", avg_temp_day_after, day_after_rule, day_after_persons)
+    tomorrow_selected = tomorrow["selected_simulation"]
+
+    return {
+        "enabled": bool(enabled),
+        "available": bool(enabled),
+        "algorithm": "Interaktive Energie-Simulation: 3-Punkt-Heizkurve + Warmwasser-Solltemperatur",
+        "heating_curve_points": {
+            "cold": {"outside_c": HEATING_CURVE_OUTDOOR_COLD, "flow_c": flow_cold},
+            "mid": {"outside_c": HEATING_CURVE_OUTDOOR_MID, "flow_c": flow_mid},
+            "warm": {"outside_c": HEATING_CURVE_OUTDOOR_WARM, "flow_c": flow_warm},
+        },
+        "saving_factor_percent_per_c": saving_percent_per_c,
+        "dhw": {
+            "target_temp_c": dhw_target_temp_c,
+            "target_delta_c": dhw_target_delta_c,
+            "tank_volume_l": dhw_tank_volume_l,
+            "liters_per_person": dhw_liters_per_person,
+            "cold_water_reference_c": cold_water_temp_c,
+        },
+        "runtime_controls": {
+            "heating_curve_delta_c": heating_curve_delta_c,
+            "dhw_target_delta_c": dhw_target_delta_c,
+            "note": "Diese Werte kommen aus Number-Entitäten und können im laufenden Betrieb geändert werden.",
+        },
+        "important_note": "Heizkurve wirkt nur auf Heizanteil. Warmwasser-Solltemperatur wirkt nur auf Warmwasseranteil. Im Sommerbetrieb ist der Heizkurven-Effekt 0 kWh.",
+        "today": today,
+        "tomorrow": tomorrow,
+        "day_after_tomorrow": day_after,
+        "summary": {
+            "primary_basis": "tomorrow",
+            "basis_label": "Prognose morgen",
+            "basis_forecast_kwh": tomorrow.get("base_forecast_kwh"),
+            "selected_effect_kwh": tomorrow_selected["total_change_kwh_day"],
+            "effect_type": "saving" if float(tomorrow_selected["total_change_kwh_day"] or 0.0) < 0 else "additional_consumption" if float(tomorrow_selected["total_change_kwh_day"] or 0.0) > 0 else "no_change",
+            "new_forecast_kwh": tomorrow_selected["new_forecast_kwh"],
+            "heating_curve_delta_c": round(heating_curve_delta_c, 2),
+            "dhw_delta_c": round(dhw_target_delta_c, 2),
+            "simulation_summary": f"Prognose morgen {float(tomorrow.get('base_forecast_kwh') or 0.0):.2f} kWh -> neue Prognose {float(tomorrow_selected['new_forecast_kwh'] or 0.0):.2f} kWh ({float(tomorrow_selected['total_change_kwh_day'] or 0.0):+.3f} kWh)",
+            "tomorrow_selected_total_change_kwh": tomorrow_selected["total_change_kwh_day"],
+            "tomorrow_selected_total_saving_kwh": tomorrow_selected["total_saving_kwh_day"],
+            "tomorrow_selected_total_additional_kwh": tomorrow_selected["total_additional_kwh_day"],
+            "tomorrow_selected_new_forecast_kwh": tomorrow_selected["new_forecast_kwh"],
+            "tomorrow_summer_mode": tomorrow["summer_mode"],
+        },
+    }
+
+
 def _safe_error_percent(actual: float | None, forecast: float | None) -> float | None:
     """Return absolute forecast error in percent."""
     actual_f = _to_float(actual)
@@ -318,21 +591,44 @@ def _forecast_quality_metrics(samples: list[dict[str, Any]]) -> dict[str, Any]:
     last_7 = _window(rows[-7:])
     last_30 = _window(rows[-30:])
     last_90 = _window(rows[-90:])
+    active_window = "last_30" if last_30.get("sample_count") else "all"
     mape = last_30.get("mape_percent") if last_30.get("sample_count") else all_metrics.get("mape_percent")
+    accuracy_percent = round(max(0.0, min(100.0, 100.0 - float(mape))), 2) if mape is not None else None
     if mape is None:
         quality_label = "Keine Bewertung"
-    elif mape <= 15:
+        quality_description = "Noch keine abgeschlossenen Vergleichsdaten vorhanden."
+    elif mape <= 5:
+        quality_label = "Exzellent"
+        quality_description = "Die Prognose liegt sehr nah am tatsächlichen Verbrauch."
+    elif mape <= 10:
         quality_label = "Sehr gut"
-    elif mape <= 25:
+        quality_description = "Die Prognose ist sehr zuverlässig."
+    elif mape <= 15:
         quality_label = "Gut"
-    elif mape <= 40:
+        quality_description = "Die Prognose ist gut nutzbar."
+    elif mape <= 25:
         quality_label = "Ausreichend"
-    else:
+        quality_description = "Die Prognose ist brauchbar, sollte aber weiter beobachtet werden."
+    elif mape <= 40:
         quality_label = "Schwach"
+        quality_description = "Die Prognose weicht noch deutlich ab. Weitere Trainingsdaten sind sinnvoll."
+    else:
+        quality_label = "Unzureichend"
+        quality_description = "Die Prognose ist noch nicht belastbar."
+    summary = (
+        f"{quality_label}: {accuracy_percent:.2f}% Genauigkeit, MAPE {float(mape):.2f}%"
+        if mape is not None and accuracy_percent is not None
+        else quality_description
+    )
     return {
         "available": bool(rows),
         "sample_count": len(rows),
         "quality_label": quality_label,
+        "quality_description": quality_description,
+        "accuracy_percent": accuracy_percent,
+        "mape_used_percent": round(float(mape), 2) if mape is not None else None,
+        "active_window": active_window,
+        "summary": summary,
         "latest": rows[-1] if rows else None,
         "last_7": last_7,
         "last_30": last_30,
@@ -518,7 +814,62 @@ class HeatPumpForecastCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         except Exception as err:  # noqa: BLE001
             _LOGGER.debug("Could not save heating curve file %s: %s", self._heating_curve_path, err)
 
-    def _finalize_previous_training_samples(self, samples: list[dict[str, Any]], today_date: str, total_series: dict[str, Any], heating_series: dict[str, Any], dhw_series: dict[str, Any]) -> list[dict[str, Any]]:
+
+    def _repair_no_dhw_meter_training_values(self, sample: dict[str, Any], dhw_meter_missing: bool = False) -> dict[str, Any]:
+        """Fill derived DHW/heating values for installations without a DHW meter.
+
+        In no-DHW-meter mode DHW is always derived as total minus heating. This
+        also repairs older samples so ML training does not learn from null split
+        values when the total daily energy is known.
+        """
+        mode = sample.get("dhw_meter_mode")
+        split_source = sample.get("split_source") or sample.get("actual_split_source")
+        no_dhw_meter_sample = bool(
+            dhw_meter_missing
+            or mode == DHW_DAILY_ENERGY_MODE_NONE
+            or (isinstance(split_source, str) and split_source.startswith("no_dhw_meter"))
+        )
+        if not no_dhw_meter_sample:
+            return sample
+
+        def _round_or_none(value: Any) -> float | None:
+            value_f = _to_float(value)
+            return round(value_f, 3) if value_f is not None else None
+
+        sample["dhw_meter_mode"] = DHW_DAILY_ENERGY_MODE_NONE
+        sample["split_source"] = "no_dhw_meter_total_minus_heating"
+
+        total_so_far_f = _to_float(sample.get("actual_total_kwh_so_far"))
+        heating_so_far_f = _to_float(sample.get("actual_heating_kwh_so_far"))
+        if total_so_far_f is not None:
+            if heating_so_far_f is None:
+                heating_so_far_f = 0.0
+            heating_so_far_f = max(0.0, min(total_so_far_f, heating_so_far_f))
+            sample["actual_total_kwh_so_far"] = round(total_so_far_f, 3)
+            sample["actual_heating_kwh_so_far"] = round(heating_so_far_f, 3)
+            sample["actual_dhw_kwh_so_far"] = round(max(total_so_far_f - heating_so_far_f, 0.0), 3)
+
+        total_final_f = _to_float(sample.get("actual_total_kwh_final"))
+        heating_final_f = _to_float(sample.get("actual_heating_kwh_final"))
+        if total_final_f is not None:
+            if heating_final_f is None:
+                heating_final_f = _to_float(sample.get("actual_heating_kwh_so_far"))
+            if heating_final_f is None:
+                heating_final_f = 0.0
+            heating_final_f = max(0.0, min(total_final_f, heating_final_f))
+            sample["actual_total_kwh_final"] = round(total_final_f, 3)
+            sample["actual_heating_kwh_final"] = round(heating_final_f, 3)
+            sample["actual_dhw_kwh_final"] = round(max(total_final_f - heating_final_f, 0.0), 3)
+            sample["actual_split_source"] = "no_dhw_meter_total_minus_heating"
+            if sample.get("completed") is True:
+                # For completed days the so-far values should be complete too.
+                sample["actual_total_kwh_so_far"] = round(total_final_f, 3)
+                sample["actual_heating_kwh_so_far"] = round(heating_final_f, 3)
+                sample["actual_dhw_kwh_so_far"] = round(max(total_final_f - heating_final_f, 0.0), 3)
+
+        return sample
+
+    def _finalize_previous_training_samples(self, samples: list[dict[str, Any]], today_date: str, total_series: dict[str, Any], heating_series: dict[str, Any], dhw_series: dict[str, Any], dhw_meter_missing: bool = False) -> list[dict[str, Any]]:
         now_iso = dt_util.now().isoformat()
         for sample in samples:
             sample_date = sample.get("date")
@@ -537,10 +888,34 @@ class HeatPumpForecastCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 continue
             final_heating_f = _to_float((heating_series or {}).get(sample_date))
             final_dhw_f = _to_float((dhw_series or {}).get(sample_date))
-            if final_dhw_f is None and final_heating_f is not None:
-                final_dhw_f = max(final_total_f - final_heating_f, 0.0)
-            if final_heating_f is None and final_dhw_f is not None:
-                final_heating_f = max(final_total_f - final_dhw_f, 0.0)
+            split_source_final = sample.get("split_source")
+            sample_avg_temp = _to_float(sample.get("avg_temperature_c"))
+            sample_threshold = _to_float(sample.get("heating_threshold_c"))
+
+            if dhw_meter_missing:
+                if final_heating_f is None:
+                    if sample_avg_temp is not None and sample_threshold is not None and sample_avg_temp >= sample_threshold:
+                        final_heating_f = 0.0
+                        split_source_final = "no_dhw_meter_total_as_dhw"
+                    else:
+                        estimated_heating = _to_float(sample.get("estimated_heating_basis_kwh"))
+                        final_heating_f = max(0.0, min(final_total_f, estimated_heating or 0.0))
+                        split_source_final = "estimated_no_dhw_meter_total_minus_heating"
+                final_dhw_f = max(final_total_f - float(final_heating_f or 0.0), 0.0)
+                if split_source_final not in ("no_dhw_meter_total_as_dhw", "estimated_no_dhw_meter_total_minus_heating"):
+                    split_source_final = "no_dhw_meter_total_minus_heating"
+            else:
+                if final_dhw_f is None and final_heating_f is not None:
+                    final_dhw_f = max(final_total_f - final_heating_f, 0.0)
+                    split_source_final = "total_minus_heating"
+                if final_heating_f is None and final_dhw_f is not None:
+                    final_heating_f = max(final_total_f - final_dhw_f, 0.0)
+                    split_source_final = "total_minus_dhw"
+                if final_heating_f is None and final_dhw_f is None and sample_avg_temp is not None and sample_threshold is not None and sample_avg_temp >= sample_threshold:
+                    final_heating_f = 0.0
+                    final_dhw_f = final_total_f
+                    split_source_final = "summer_total_as_dhw"
+
             forecast_today_f = _to_float(sample.get("forecast_today_kwh"))
             sample["completed"] = True
             sample["completed_at"] = now_iso
@@ -548,18 +923,24 @@ class HeatPumpForecastCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             sample["actual_total_kwh_final"] = round(final_total_f, 3)
             sample["actual_heating_kwh_final"] = round(final_heating_f, 3) if final_heating_f is not None else None
             sample["actual_dhw_kwh_final"] = round(final_dhw_f, 3) if final_dhw_f is not None else None
+            sample["actual_split_source"] = split_source_final
+            if dhw_meter_missing:
+                self._repair_no_dhw_meter_training_values(sample, dhw_meter_missing=True)
             if forecast_today_f is not None:
                 error = final_total_f - forecast_today_f
                 sample["forecast_error_kwh"] = round(error, 3)
                 sample["forecast_abs_error_kwh"] = round(abs(error), 3)
         return samples
 
-    async def _async_store_training_sample(self, sample: dict[str, Any], total_series: dict[str, Any] | None = None, heating_series: dict[str, Any] | None = None, dhw_series: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    async def _async_store_training_sample(self, sample: dict[str, Any], total_series: dict[str, Any] | None = None, heating_series: dict[str, Any] | None = None, dhw_series: dict[str, Any] | None = None, dhw_meter_missing: bool = False) -> list[dict[str, Any]]:
         samples = await self._async_load_training_samples()
+        if dhw_meter_missing:
+            samples = [self._repair_no_dhw_meter_training_values(existing, dhw_meter_missing=True) for existing in samples]
+            sample = self._repair_no_dhw_meter_training_values(sample, dhw_meter_missing=True)
         date_key = sample.get("date")
         if not date_key:
             return samples
-        samples = self._finalize_previous_training_samples(samples, str(date_key), total_series or {}, heating_series or {}, dhw_series or {})
+        samples = self._finalize_previous_training_samples(samples, str(date_key), total_series or {}, heating_series or {}, dhw_series or {}, dhw_meter_missing=dhw_meter_missing)
         for idx, existing in enumerate(samples):
             if existing.get("date") == date_key:
                 samples[idx] = sample
@@ -664,7 +1045,7 @@ class HeatPumpForecastCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return {**empty, "today_avg": today_avg}
         return {"available": True, "days": len(completed), "values": completed[-30:], "series": dict(list(series.items())[-30:]), "avg_7": round(_avg(completed, 7), 2), "avg_14": round(_avg(completed, 14), 2), "avg_30": round(_avg(completed, 30), 2), "today_avg": today_avg}
 
-    async def _async_get_daily_history_stats(self, entity_id: str | None, days: int = 30) -> dict[str, Any]:
+    async def _async_get_daily_history_stats(self, entity_id: str | None, days: int = 30, include_zero: bool = False) -> dict[str, Any]:
         empty = {"available": False, "days": 0, "values": [], "avg_7": None, "avg_14": None, "avg_30": None, "basis": None, "series": {}}
         if not entity_id:
             return empty
@@ -689,7 +1070,7 @@ class HeatPumpForecastCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             day = dt_util.as_local(changed).date()
             if day != current_day:
                 daily_max[day] = max(daily_max.get(day, 0.0), value)
-        series = {day.isoformat(): round(v, 3) for day, v in sorted(daily_max.items()) if v > 0}
+        series = {day.isoformat(): round(v, 3) for day, v in sorted(daily_max.items()) if include_zero or v > 0}
         values = list(series.values())
         if not values:
             return empty
@@ -709,6 +1090,7 @@ class HeatPumpForecastCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def _async_update_data(self) -> dict[str, Any]:
         config = {**self.entry.data, **self.entry.options}
+        runtime_options = self.hass.data.get(DOMAIN, {}).get(self.entry.entry_id, {}).get("runtime_options", {})
         daily_entity = config.get(CONF_HEATPUMP_DAILY_ENERGY_SENSOR)
         total_entity = config.get(CONF_HEATPUMP_TOTAL_ENERGY_SENSOR)
         current_temp = _float_state(self.hass, config.get(CONF_OUTDOOR_TEMP_SENSOR))
@@ -723,15 +1105,35 @@ class HeatPumpForecastCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         day_after_occ = await self._async_get_calendar_occupancy_for_day(units, 2, fallback_persons=current_occ.persons) or tomorrow_occ
 
         heating_entity = config.get(CONF_HEATING_DAILY_ENERGY_SENSOR)
-        dhw_entity = config.get(CONF_DHW_DAILY_ENERGY_SENSOR)
+        # Es gibt keinen separaten Warmwasser-Energiezähler mehr in der UI.
+        # Warmwasser wird immer aus Gesamtverbrauch minus Heizverbrauch berechnet.
+        dhw_entity = None
+        dhw_mode = DHW_DAILY_ENERGY_MODE_NONE
+        dhw_meter_missing = True
         heating_threshold = float(config.get(CONF_HEATING_THRESHOLD_TEMP, 17.0) or 17.0)
+        heating_curve_simulation_enabled = bool(config.get(CONF_HEATING_CURVE_SIMULATION_ENABLED, True))
+        heating_curve_flow_warm = float(config.get(CONF_HEATING_CURVE_FLOW_WARM, DEFAULT_HEATING_CURVE_FLOW_WARM) or DEFAULT_HEATING_CURVE_FLOW_WARM)
+        heating_curve_flow_mid = float(config.get(CONF_HEATING_CURVE_FLOW_MID, DEFAULT_HEATING_CURVE_FLOW_MID) or DEFAULT_HEATING_CURVE_FLOW_MID)
+        heating_curve_flow_cold = float(config.get(CONF_HEATING_CURVE_FLOW_COLD, DEFAULT_HEATING_CURVE_FLOW_COLD) or DEFAULT_HEATING_CURVE_FLOW_COLD)
+        heating_curve_saving_percent_per_c = float(config.get(CONF_HEATING_CURVE_SAVING_PERCENT_PER_C, DEFAULT_HEATING_CURVE_SAVING_PERCENT_PER_C) or DEFAULT_HEATING_CURVE_SAVING_PERCENT_PER_C)
+        dhw_target_temp_c = float(config.get(CONF_DHW_TARGET_TEMP, DEFAULT_DHW_TARGET_TEMP) or DEFAULT_DHW_TARGET_TEMP)
+        dhw_tank_volume_l = float(config.get(CONF_DHW_TANK_VOLUME_L, DEFAULT_DHW_TANK_VOLUME_L) or DEFAULT_DHW_TANK_VOLUME_L)
+        dhw_liters_per_person = float(config.get(CONF_DHW_LITERS_PER_PERSON, DEFAULT_DHW_LITERS_PER_PERSON) or DEFAULT_DHW_LITERS_PER_PERSON)
+        heating_curve_delta_c = float(runtime_options.get(RUNTIME_HEATING_CURVE_DELTA_C, 0.0) or 0.0)
+        dhw_target_delta_c = float(runtime_options.get(RUNTIME_DHW_TARGET_DELTA_C, 0.0) or 0.0)
         today_so_far_kwh = _energy_kwh(self.hass, daily_entity)
         today_heating_so_far_kwh = _energy_kwh(self.hass, heating_entity)
-        today_dhw_so_far_kwh = _energy_kwh(self.hass, dhw_entity)
+        if dhw_meter_missing:
+            if today_so_far_kwh is not None:
+                today_dhw_so_far_kwh = max(float(today_so_far_kwh) - float(today_heating_so_far_kwh or 0.0), 0.0)
+            else:
+                today_dhw_so_far_kwh = None
+        else:
+            today_dhw_so_far_kwh = _energy_kwh(self.hass, dhw_entity)
 
         history_stats = await self._async_get_daily_history_stats(daily_entity)
-        heating_history = await self._async_get_daily_history_stats(heating_entity)
-        dhw_history = await self._async_get_daily_history_stats(dhw_entity)
+        heating_history = await self._async_get_daily_history_stats(heating_entity, include_zero=True)
+        dhw_history = {"available": False, "days": 0, "values": [], "avg_7": None, "avg_14": None, "avg_30": None, "basis": None, "series": {}} if dhw_meter_missing else await self._async_get_daily_history_stats(dhw_entity, include_zero=True)
         temp_history = await self._async_get_temperature_history_stats(config.get(CONF_OUTDOOR_TEMP_SENSOR))
         heating_curve = _learn_heating_curve(temp_history.get("series") or {}, heating_history.get("series") or {}, heating_threshold)
         await self._async_store_heating_curve(heating_curve)
@@ -763,7 +1165,20 @@ class HeatPumpForecastCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         heating_baseline = heating_history.get("basis")
         dhw_baseline = dhw_history.get("basis")
         split_source = "estimated_split"
-        if heating_baseline is not None and dhw_baseline is None:
+        if dhw_meter_missing:
+            if heating_baseline is None:
+                ref = temp_history.get("avg_7") if temp_history.get("avg_7") is not None else today_avg_temp
+                if ref is not None and ref >= heating_threshold:
+                    heating_baseline = 0.0
+                    split_source = "no_dhw_meter_total_as_dhw"
+                else:
+                    share = max(0.0, min(0.75, _heating_degree_factor(ref, heating_threshold) / 2.8))
+                    heating_baseline = round(float(baseline_kwh) * share, 2)
+                    split_source = "estimated_no_dhw_meter_total_minus_heating"
+            dhw_baseline = round(max(float(baseline_kwh) - float(heating_baseline or 0.0), 0.0), 2)
+            if split_source not in ("no_dhw_meter_total_as_dhw", "estimated_no_dhw_meter_total_minus_heating"):
+                split_source = "no_dhw_meter_total_minus_heating"
+        elif heating_baseline is not None and dhw_baseline is None:
             dhw_baseline = round(max(float(baseline_kwh) - float(heating_baseline or 0), 0.0), 2)
             split_source = "total_minus_heating"
         elif heating_baseline is not None and dhw_baseline is not None:
@@ -798,6 +1213,28 @@ class HeatPumpForecastCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         today_rule_calc = _rule_forecast_for(today_avg_temp, current_occ)
         tomorrow_rule_calc = _rule_forecast_for(tomorrow_avg_temp, tomorrow_occ)
         day_after_rule_calc = _rule_forecast_for(day_after_avg_temp, day_after_occ)
+        heating_curve_simulation = _build_heating_curve_simulation(
+            enabled=heating_curve_simulation_enabled,
+            avg_temp_today=today_avg_temp,
+            avg_temp_tomorrow=tomorrow_avg_temp,
+            avg_temp_day_after=day_after_avg_temp,
+            heating_threshold=heating_threshold,
+            flow_cold=heating_curve_flow_cold,
+            flow_mid=heating_curve_flow_mid,
+            flow_warm=heating_curve_flow_warm,
+            saving_percent_per_c=heating_curve_saving_percent_per_c,
+            heating_curve_delta_c=heating_curve_delta_c,
+            dhw_target_delta_c=dhw_target_delta_c,
+            dhw_target_temp_c=dhw_target_temp_c,
+            dhw_tank_volume_l=dhw_tank_volume_l,
+            dhw_liters_per_person=dhw_liters_per_person,
+            today_rule=today_rule_calc,
+            tomorrow_rule=tomorrow_rule_calc,
+            day_after_rule=day_after_rule_calc,
+            today_persons=current_occ.persons,
+            tomorrow_persons=tomorrow_occ.persons,
+            day_after_persons=day_after_occ.persons,
+        )
         today_floor = today_so_far_kwh if today_so_far_kwh is not None and 0 <= today_so_far_kwh < 500 else 0.0
         rule_today = round(max(today_floor, today_rule_calc["total_kwh"]), 2)
         rule_tomorrow = tomorrow_rule_calc["total_kwh"]
@@ -823,8 +1260,9 @@ class HeatPumpForecastCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "weekday": dt_util.now().weekday(), "month": dt_util.now().month,
             "forecast_today_kwh": rule_today, "rest_today_kwh": rest_today, "forecast_tomorrow_kwh": rule_tomorrow,
             "forecast_day_after_tomorrow_kwh": rule_day_after, "source": source, "split_source": split_source,
+            "dhw_meter_mode": dhw_mode,
         }
-        training_samples = await self._async_store_training_sample(training_sample, history_stats.get("series") or {}, heating_history.get("series") or {}, dhw_history.get("series") or {})
+        training_samples = await self._async_store_training_sample(training_sample, history_stats.get("series") or {}, heating_history.get("series") or {}, dhw_history.get("series") or {}, dhw_meter_missing=dhw_meter_missing)
         completed_samples = completed_training_samples(training_samples)
         pending_samples = [s for s in training_samples if not s.get("completed")]
         ml_status = await self._async_train_ml(training_samples)
@@ -853,10 +1291,10 @@ class HeatPumpForecastCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         confidence_label, confidence_stage = ("Unzureichend", 1) if completed_count < 7 else ("Schwach", 2) if completed_count < 15 else ("Ausreichend", 3) if completed_count < 30 else ("Gut", 4) if completed_count < 90 else ("Sehr gut", 5)
         confidence = min(90, 30 + (25 if source == "daily_history" else 15) + (10 if temp_history.get("available") else 5 if current_temp is not None else 0) + (10 if forecast_temps.get(1) is not None else 0) + (5 if forecast_temps.get(2) is not None else 0) + (5 if units else 0) + (5 if heating_entity or dhw_entity else 0) + (5 if ml_status.get("active") else 0))
         reason_summary = " + ".join([forecast_model, _label_source(source), "Wetter", "Personen" if current_occ.total_units > 0 else "Heizgrenze", "Heizkurve" if heating_curve.get("active") else "Heizgrenze"])
-        reason_text = f"v0.9.3 | Prognosemodell: {forecast_model} | ML-Status: {ml_status.get('status')} | Datenbasis: {_label_source(source)} | Basis {baseline_kwh:.2f} kWh | Morgen Regelmodell {rule_tomorrow:.2f} kWh, final {tomorrow:.2f} kWh | Übermorgen Regelmodell {rule_day_after:.2f} kWh, final {day_after:.2f} kWh"
+        reason_text = f"v1.1.6 | Prognosemodell: {forecast_model} | ML-Status: {ml_status.get('status')} | Datenbasis: {_label_source(source)} | Basis {baseline_kwh:.2f} kWh | Morgen Regelmodell {rule_tomorrow:.2f} kWh, final {tomorrow:.2f} kWh | Übermorgen Regelmodell {rule_day_after:.2f} kWh, final {day_after:.2f} kWh"
 
         reason_structured = {
-            "version": "Basis v0.9.3", "source": source, "split_source": split_source, "forecast_model": forecast_model, "ml_status": ml_status, "forecast_quality": forecast_quality, "model_selection": model_selection, "learning_analysis": learning_analysis,
+            "version": "Basis v1.1.6", "source": source, "split_source": split_source, "forecast_model": forecast_model, "ml_status": ml_status, "forecast_quality": forecast_quality, "model_selection": model_selection, "learning_analysis": learning_analysis, "heating_curve_simulation": heating_curve_simulation,
             "today_so_far_kwh": round(today_so_far_kwh, 2) if today_so_far_kwh is not None else None,
             "today_heating_so_far_kwh": round(today_heating_so_far_kwh, 2) if today_heating_so_far_kwh is not None else None,
             "today_dhw_so_far_kwh": round(today_dhw_so_far_kwh, 2) if today_dhw_so_far_kwh is not None else None,
@@ -878,12 +1316,13 @@ class HeatPumpForecastCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "training_latest_sample": training_sample, "training_last_7_samples": training_samples[-7:], "training_completed_last_7_samples": completed_samples[-7:],
             "storage_paths": self._storage_paths_attributes(),
             "storage_status": {"Speicherstatus": "OK", "Trainingsdaten_Datei_vorhanden": self._training_data_path.exists(), "Heizkurven_Datei_vorhanden": self._heating_curve_path.exists(), "ML_Modell_Datei_vorhanden": self._model_path.exists(), "Trainingsdaten_Datei": str(self._training_data_path), "Heizkurven_Datei": str(self._heating_curve_path), "ML_Modell_Datei": str(self._model_path), "Gesammelte_Tagesdaten_ML": len(training_samples), "Abgeschlossene_Tagesdaten_ML": len(completed_samples), "Offene_Tagesdaten_ML": len(pending_samples)},
-            "heating_curve": heating_curve, "ml_status": ml_status, "forecast_model": forecast_model, "forecast_quality": forecast_quality, "model_selection": model_selection, "learning_analysis": learning_analysis,
+            "heating_curve": heating_curve, "heating_curve_simulation": heating_curve_simulation, "ml_status": ml_status, "forecast_model": forecast_model, "forecast_quality": forecast_quality, "model_selection": model_selection, "learning_analysis": learning_analysis, "heating_curve_simulation": heating_curve_simulation,
         }
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
     coordinator = HeatPumpForecastCoordinator(hass, entry)
+    hass.data.setdefault(DOMAIN, {}).setdefault(entry.entry_id, {})["coordinator"] = coordinator
     await coordinator.async_config_entry_first_refresh()
     async_add_entities([
         HeatPumpForecastSensor(coordinator, entry, "tomorrow_kwh", "Verbrauch morgen", "mdi:calendar-today"),
@@ -899,12 +1338,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         HeatPumpHeatingCurveStatusSensor(coordinator, entry),
         HeatPumpHeatingCurveSensor(coordinator, entry),
         HeatPumpForecastEvaluationSensor(coordinator, entry),
+        HeatPumpForecastQualityRatingSensor(coordinator, entry),
+        HeatPumpForecastAccuracySensor(coordinator, entry),
         HeatPumpMLDiagnosticsSensor(coordinator, entry),
         HeatPumpMLQualitySensor(coordinator, entry),
         HeatPumpModelSelectionSensor(coordinator, entry),
         HeatPumpLearningAnalysisSensor(coordinator, entry),
-        HeatPumpForecastErrorHistorySensor(coordinator, entry),
         HeatPumpHeatingCurveAnalysisSensor(coordinator, entry),
+        HeatPumpHeatingCurveSimulationSensor(coordinator, entry),
         HeatPumpMLStatusSensor(coordinator, entry),
         HeatPumpForecastModelSensor(coordinator, entry),
     ])
@@ -986,7 +1427,40 @@ class HeatPumpReasonSensor(HeatPumpStringSensor):
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         structured = self.coordinator.data.get("reason_structured") or {}
-        return {"Kurzfassung": self.coordinator.data.get("reason_summary"), "Details": self.coordinator.data.get("reason"), "Version": structured.get("version"), "Datenbasis": _label_source(structured.get("source")), "Aufteilung": _label_split_source(structured.get("split_source")), "Prognosemodell": structured.get("forecast_model"), "ML_Status": structured.get("ml_status"), "Heute": structured.get("today"), "Morgen": structured.get("tomorrow"), "Übermorgen": structured.get("day_after_tomorrow"), "Lernspeicher": structured.get("training"), "Heizkurve": structured.get("heating_curve")}
+        training = structured.get("training") or {}
+        ml_status = structured.get("ml_status") or {}
+        today = structured.get("today") or {}
+        tomorrow = structured.get("tomorrow") or {}
+        day_after = structured.get("day_after_tomorrow") or {}
+        # Keep this diagnostic sensor small. Home Assistant recorder drops
+        # attributes above 16 KiB, so do not expose full training samples,
+        # ML feature dictionaries or full history arrays here. Detailed
+        # diagnostics are available in the dedicated diagnostic sensors/files.
+        return {
+            "Kurzfassung": self.coordinator.data.get("reason_summary"),
+            "Details": self.coordinator.data.get("reason"),
+            "Version": structured.get("version"),
+            "Datenbasis": _label_source(structured.get("source")),
+            "Aufteilung": _label_split_source(structured.get("split_source")),
+            "Prognosemodell": structured.get("forecast_model"),
+            "ML_Status": ml_status.get("status") if isinstance(ml_status, dict) else ml_status,
+            "ML_Aktiv": ml_status.get("active") if isinstance(ml_status, dict) else None,
+            "Heute_bisher_kWh": structured.get("today_so_far_kwh"),
+            "Heizung_bisher_kWh": structured.get("today_heating_so_far_kwh"),
+            "Warmwasser_bisher_kWh": structured.get("today_dhw_so_far_kwh"),
+            "Heute_Temperatur_C": today.get("avg_temperature_c") if isinstance(today, dict) else None,
+            "Morgen_Prognose_kWh": self.coordinator.data.get("tomorrow_kwh"),
+            "Morgen_Temperatur_C": tomorrow.get("avg_temperature_c") if isinstance(tomorrow, dict) else None,
+            "Übermorgen_Prognose_kWh": self.coordinator.data.get("day_after_tomorrow_kwh"),
+            "Übermorgen_Temperatur_C": day_after.get("avg_temperature_c") if isinstance(day_after, dict) else None,
+            "Trainingsdaten_gesamt": training.get("sample_count") if isinstance(training, dict) else None,
+            "Trainingsdaten_abgeschlossen": training.get("completed_sample_count") if isinstance(training, dict) else None,
+            "Trainingsdaten_offen": training.get("pending_sample_count") if isinstance(training, dict) else None,
+            "Heizgrenze_C": structured.get("heating_threshold_c"),
+            "Basis_kWh": structured.get("baseline_kwh"),
+            "Heizbasis_kWh": structured.get("heating_baseline_kwh"),
+            "Warmwasserbasis_kWh": structured.get("dhw_baseline_kwh"),
+        }
 
 
 class HeatPumpTrainingSamplesSensor(HeatPumpStringSensor):
@@ -1100,6 +1574,65 @@ class HeatPumpForecastEvaluationSensor(HeatPumpStringSensor):
         return self.coordinator.data.get("forecast_quality") or {}
 
 
+class HeatPumpForecastQualityRatingSensor(HeatPumpStringSensor):
+    def __init__(self, coordinator: HeatPumpForecastCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, entry, "forecast_quality_rating", "Prognosequalität", "mdi:star-check-outline")
+
+    @property
+    def native_value(self) -> str:
+        quality = self.coordinator.data.get("forecast_quality") or {}
+        return quality.get("quality_label") or "Keine Bewertung"
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        quality = self.coordinator.data.get("forecast_quality") or {}
+        return {
+            "Bewertung": quality.get("quality_label"),
+            "Beschreibung": quality.get("quality_description"),
+            "Genauigkeit_Prozent": quality.get("accuracy_percent"),
+            "MAPE_Prozent": quality.get("mape_used_percent"),
+            "Aktives_Fenster": quality.get("active_window"),
+            "Zusammenfassung": quality.get("summary"),
+            "Letzter_Vergleich": quality.get("latest"),
+            "Letzte_7_Tage": quality.get("last_7"),
+            "Letzte_30_Tage": quality.get("last_30"),
+            "Letzte_90_Tage": quality.get("last_90"),
+            "Hinweis": "Bewertung anhand abgeschlossener Tagesvergleiche. Niedrige MAPE bedeutet hohe Prognosequalität.",
+        }
+
+
+class HeatPumpForecastAccuracySensor(HeatPumpBaseSensor):
+    _attr_native_unit_of_measurement = "%"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_icon = "mdi:percent-outline"
+    _attr_name = "Prognosegenauigkeit"
+
+    def __init__(self, coordinator: HeatPumpForecastCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, entry)
+        self._attr_translation_key = "forecast_accuracy"
+        self._attr_unique_id = f"{entry.entry_id}_forecast_accuracy"
+
+    @property
+    def native_value(self) -> float | None:
+        quality = self.coordinator.data.get("forecast_quality") or {}
+        return quality.get("accuracy_percent")
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        quality = self.coordinator.data.get("forecast_quality") or {}
+        active_window = quality.get("active_window") or "last_30"
+        active_metrics = quality.get(active_window) or quality.get("all") or {}
+        return {
+            "quality_rating": quality.get("quality_label"),
+            "sample_count": quality.get("sample_count"),
+            "mape_percent": quality.get("mape_used_percent"),
+            "mae_kwh": active_metrics.get("mae_kwh"),
+            "rmse_kwh": active_metrics.get("rmse_kwh"),
+            "active_window": active_window,
+            "summary": quality.get("summary"),
+        }
+
+
 class HeatPumpMLDiagnosticsSensor(HeatPumpStringSensor):
     def __init__(self, coordinator: HeatPumpForecastCoordinator, entry: ConfigEntry) -> None:
         super().__init__(coordinator, entry, "ml_diagnostics", "ML-Diagnose", "mdi:brain")
@@ -1167,25 +1700,6 @@ class HeatPumpLearningAnalysisSensor(HeatPumpStringSensor):
         return self.coordinator.data.get("learning_analysis") or {}
 
 
-class HeatPumpForecastErrorHistorySensor(HeatPumpStringSensor):
-    def __init__(self, coordinator: HeatPumpForecastCoordinator, entry: ConfigEntry) -> None:
-        super().__init__(coordinator, entry, "forecast_error_history", "Prognosefehler Verlauf", "mdi:chart-timeline")
-
-    @property
-    def native_value(self) -> str:
-        series = ((self.coordinator.data.get("learning_analysis") or {}).get("forecast_error_series") or [])
-        return f"{len(series)} Werte" if series else "Keine Werte"
-
-    @property
-    def extra_state_attributes(self) -> dict[str, Any]:
-        analysis = self.coordinator.data.get("learning_analysis") or {}
-        return {
-            "forecast_error_series": analysis.get("forecast_error_series"),
-            "ml_quality_series": analysis.get("ml_quality_series"),
-            "Hinweis": "Für grafische Auswertung in ApexCharts/Plotly geeignet.",
-        }
-
-
 class HeatPumpHeatingCurveAnalysisSensor(HeatPumpStringSensor):
     def __init__(self, coordinator: HeatPumpForecastCoordinator, entry: ConfigEntry) -> None:
         super().__init__(coordinator, entry, "heating_curve_analysis", "Heizkurvenanalyse Verlauf", "mdi:chart-scatter-plot")
@@ -1202,6 +1716,39 @@ class HeatPumpHeatingCurveAnalysisSensor(HeatPumpStringSensor):
             "heating_curve_series": analysis.get("heating_curve_series"),
             "heating_curve": self.coordinator.data.get("heating_curve"),
             "Hinweis": "Temperatur/Heizverbrauch-Punkte für grafische Heizkurvenanalyse.",
+        }
+
+
+class HeatPumpHeatingCurveSimulationSensor(HeatPumpStringSensor):
+    def __init__(self, coordinator: HeatPumpForecastCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, entry, "energy_simulation", "Energie-Simulation", "mdi:home-thermometer-outline")
+
+    @property
+    def native_value(self) -> float | str | None:
+        simulation = self.coordinator.data.get("heating_curve_simulation") or {}
+        summary = simulation.get("summary") or {}
+        # Sensor state is the selected tomorrow energy effect in kWh.
+        # Negative values mean savings, positive values mean additional consumption.
+        return summary.get("selected_effect_kwh") or 0.0
+
+    @property
+    def native_unit_of_measurement(self) -> str | None:
+        return UnitOfEnergy.KILO_WATT_HOUR
+
+    @property
+    def device_class(self) -> SensorDeviceClass | None:
+        return SensorDeviceClass.ENERGY
+
+    @property
+    def state_class(self) -> SensorStateClass | None:
+        return SensorStateClass.MEASUREMENT
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        simulation = self.coordinator.data.get("heating_curve_simulation") or {}
+        return {
+            **simulation,
+            "Hinweis": "Interaktive Simulation: Heizkurve wirkt nur auf Heizanteil; Warmwasser-Solltemperatur wirkt nur auf Warmwasseranteil.",
         }
 
 
