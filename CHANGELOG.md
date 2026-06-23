@@ -4,6 +4,49 @@ All notable changes to this project will be documented in this file.
 
 ---
 
+## v1.1.6
+
+### Changed
+
+- Removed the Domestic Hot Water daily energy sensor from the configuration UI.
+- Domestic Hot Water consumption is now always calculated internally:
+
+```text
+DHW = Total daily heat pump consumption - Daily heating consumption
+```
+
+- If heating consumption is 0, total daily consumption is treated as Domestic Hot Water consumption.
+- Improved support for installations without a dedicated DHW energy meter.
+- Added automatic reconstruction of DHW consumption from total and heating consumption.
+
+### Improved
+
+- Training data consistency significantly improved.
+- Missing DHW values are automatically reconstructed where possible.
+- Eliminated unnecessary `null` values in training samples.
+- Completed samples now contain consistent `*_so_far` and `*_final` values.
+- Forecast basis diagnostics now use reduced attributes to keep Recorder data compact.
+
+### Fixed
+
+- Fixed missing DHW training values during summer operation.
+- Fixed training samples containing incomplete heating/DHW splits.
+- Fixed missing `actual_dhw_kwh_so_far` values in completed samples.
+- Fixed oversized sensor attributes causing Recorder warnings when attributes exceeded Home Assistant's 16 kB Recorder limit.
+- Improved long-term Recorder database stability.
+
+### Notes
+
+For systems without a dedicated Domestic Hot Water energy meter:
+
+```text
+DHW = Total Daily Consumption - Heating Daily Consumption
+```
+
+This is now the default and recommended operating mode.
+
+---
+
 ## v1.0.0
 
 ### 🎉 First Public Release
