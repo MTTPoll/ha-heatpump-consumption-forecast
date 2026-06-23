@@ -142,7 +142,7 @@
       },
       "sensors": {
         "title": "Sensoren auswählen",
-        "description": "Wähle Verbrauchs-, Temperatur- und Wetterdaten. Optional kann ein separater Heiz- und Warmwasser-Tagesverbrauch gewählt werden. Die Heizgrenze bestimmt, ab welcher Tagesdurchschnittstemperatur nur noch Warmwasser angenommen wird.",
+        "description": "Wähle Verbrauchs-, Temperatur- und Wetterdaten. Warmwasser wird automatisch aus Gesamtverbrauch minus Heizverbrauch berechnet.",
         "data": {
           "heatpump_daily_energy_sensor": "Wärmepumpen-Tagesverbrauchssensor (empfohlen)",
           "heatpump_total_energy_sensor": "Wärmepumpen-Gesamtzähler / accumulated (optional)",
@@ -150,7 +150,9 @@
           "weather_entity": "Wetter-Entität für Vorhersage",
           "heating_threshold_temp": "Heizgrenze / Sommerbetrieb-Schwelle",
           "heating_daily_energy_sensor": "Tagesverbrauch Heizung (optional)",
-          "dhw_daily_energy_sensor": "Tagesverbrauch Warmwasser (optional)"
+          "dhw_target_temp": "Warmwasser-Solltemperatur",
+          "dhw_tank_volume_l": "Warmwasserspeicher Volumen",
+          "dhw_liters_per_person": "Warmwasserbedarf pro Person"
         }
       }
     }
@@ -159,7 +161,7 @@
     "step": {
       "init": {
         "title": "Sensorzuordnung ändern",
-        "description": "Passe Sensoren, Heizgrenze und optionale getrennte Tagesverbräuche an.",
+        "description": "Passe Sensoren, Heizgrenze und optionale Einstellungen an. Warmwasser wird automatisch aus Gesamtverbrauch minus Heizverbrauch berechnet.",
         "data": {
           "heatpump_daily_energy_sensor": "Wärmepumpen-Tagesverbrauchssensor",
           "heatpump_total_energy_sensor": "Wärmepumpen-Gesamtzähler / accumulated",
@@ -167,7 +169,9 @@
           "weather_entity": "Wetter-Entität für Vorhersage",
           "heating_threshold_temp": "Heizgrenze / Sommerbetrieb-Schwelle",
           "heating_daily_energy_sensor": "Tagesverbrauch Heizung (optional)",
-          "dhw_daily_energy_sensor": "Tagesverbrauch Warmwasser (optional)"
+          "dhw_target_temp": "Warmwasser-Solltemperatur",
+          "dhw_tank_volume_l": "Warmwasserspeicher Volumen",
+          "dhw_liters_per_person": "Warmwasserbedarf pro Person"
         }
       }
     }

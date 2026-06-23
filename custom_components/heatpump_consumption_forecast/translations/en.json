@@ -142,7 +142,7 @@
       },
       "sensors": {
         "title": "Select sensors",
-        "description": "Wähle Verbrauchs-, Temperatur- und Wetterdaten. Optional kann ein separater Heiz- und Warmwasser-Tagesverbrauch gewählt werden. Die Heizgrenze bestimmt, ab welcher Tagesdurchschnittstemperatur nur noch Warmwasser angenommen wird.",
+        "description": "Select consumption, temperature and weather data. Domestic hot water is calculated automatically from total consumption minus heating consumption.",
         "data": {
           "heatpump_daily_energy_sensor": "Heat pump daily consumption sensor (recommended)",
           "heatpump_total_energy_sensor": "Heat pump total meter / accumulated (optional)",
@@ -150,7 +150,9 @@
           "weather_entity": "Weather entity for forecast",
           "heating_threshold_temp": "Heizgrenze / Sommerbetrieb-Schwelle",
           "heating_daily_energy_sensor": "Tagesverbrauch Heizung (optional)",
-          "dhw_daily_energy_sensor": "Tagesverbrauch Warmwasser (optional)"
+          "dhw_target_temp": "DHW target temperature",
+          "dhw_tank_volume_l": "DHW tank volume",
+          "dhw_liters_per_person": "DHW demand per person"
         }
       }
     }
@@ -159,7 +161,7 @@
     "step": {
       "init": {
         "title": "Change sensor mapping",
-        "description": "Passe Sensoren, Heizgrenze und optionale getrennte Tagesverbräuche an.",
+        "description": "Adjust sensors, heating threshold and optional settings. Domestic hot water is calculated automatically from total consumption minus heating consumption.",
         "data": {
           "heatpump_daily_energy_sensor": "Heat pump daily consumption sensor",
           "heatpump_total_energy_sensor": "Heat pump total meter / accumulated",
@@ -167,7 +169,9 @@
           "weather_entity": "Weather entity for forecast",
           "heating_threshold_temp": "Heizgrenze / Sommerbetrieb-Schwelle",
           "heating_daily_energy_sensor": "Tagesverbrauch Heizung (optional)",
-          "dhw_daily_energy_sensor": "Tagesverbrauch Warmwasser (optional)"
+          "dhw_target_temp": "DHW target temperature",
+          "dhw_tank_volume_l": "DHW tank volume",
+          "dhw_liters_per_person": "DHW demand per person"
         }
       }
     }
