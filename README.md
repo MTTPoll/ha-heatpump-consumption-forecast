@@ -2,7 +2,7 @@
 
 [![HACS](https://img.shields.io/badge/HACS-Custom-blue.svg)](https://hacs.xyz/)
 [![Home Assistant](https://img.shields.io/badge/Home%20Assistant-2026.3+-41BDF5.svg)](https://www.home-assistant.io/)
-[![Version](https://img.shields.io/badge/version-v1.0.0-green.svg)]()
+[![Version](https://img.shields.io/badge/version-v1.1.6-green.svg)]()
 [![License](https://img.shields.io/badge/license-MIT-green.svg)]()
 
 A fully local heat pump consumption forecast for Home Assistant.
@@ -166,7 +166,6 @@ Für eine sinnvolle Prognose sollten folgende Sensoren bereits vorhanden sein.
 | Sensor | Nutzen |
 |----------|---------|
 | Heizverbrauch täglich | Genauere Heizanalyse |
-| Warmwasserverbrauch täglich | Genauere Warmwasserprognose |
 | Gesamtverbrauch Wärmepumpe | Zusätzliche Plausibilitätsprüfung |
 
 ---
@@ -192,6 +191,26 @@ utility_meter:
 
 ---
 
+## Warmwasserverbrauch
+
+Ein separater Warmwasser-Energiezähler ist nicht erforderlich.
+
+Die Integration berechnet den Warmwasserverbrauch automatisch aus:
+
+```text
+Warmwasser = Tagesverbrauch Wärmepumpe - Tagesverbrauch Heizung
+```
+
+Wenn die Heizung nicht läuft:
+
+```text
+Warmwasser = Tagesverbrauch Wärmepumpe
+```
+
+Dadurch entstehen auch bei Anlagen ohne separaten Warmwasserzähler vollständige Trainingsdaten.
+
+---
+
 ## Erste Einrichtung Checkliste
 
 Vor der Konfiguration sollte vorhanden sein:
@@ -205,8 +224,6 @@ Vor der Konfiguration sollte vorhanden sein:
 Empfohlen:
 
 ✅ Heizverbrauch täglich
-
-✅ Warmwasserverbrauch täglich
 
 ✅ Gesamtverbrauch Wärmepumpe
 
@@ -460,7 +477,6 @@ For meaningful forecasts the following sensors should already exist.
 | Sensor | Benefit |
 |----------|---------|
 | Daily Heating Energy Sensor | Better heating analysis |
-| Daily Domestic Hot Water Sensor | Better DHW prediction |
 | Total Heat Pump Energy Meter | Additional validation |
 
 ---
@@ -486,6 +502,26 @@ utility_meter:
 
 ---
 
+## Domestic Hot Water Consumption
+
+A dedicated Domestic Hot Water energy meter is not required.
+
+The integration automatically calculates DHW consumption from:
+
+```text
+DHW = Daily Heat Pump Consumption - Daily Heating Consumption
+```
+
+If heating consumption is zero:
+
+```text
+DHW = Daily Heat Pump Consumption
+```
+
+This allows complete training data even on systems without a dedicated DHW meter.
+
+---
+
 ## First-Time Setup Checklist
 
 Required:
@@ -499,8 +535,6 @@ Required:
 Recommended:
 
 ✅ Daily heating energy sensor
-
-✅ Daily DHW energy sensor
 
 ✅ Total heat pump energy meter
 
